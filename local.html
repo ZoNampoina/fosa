@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080b0d">
+<title>FOSA LOCAL</title>
+<style>
+:root{color-scheme:dark;--b:#080b0d;--p:#10151a;--p2:#0b0f12;--l:#263039;--t:#f4f7f8;--m:#8e9ba5;--g:#24d18f;--r:#ff5864}
+*{box-sizing:border-box}body{margin:0;background:var(--b);color:var(--t);font-family:system-ui,-apple-system,sans-serif}.app{max-width:760px;margin:auto;padding:16px 14px 130px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.brand{font-size:24px;font-weight:950;letter-spacing:.15em}.small{font-size:11px;color:var(--m);line-height:1.45}.card{background:var(--p);border:1px solid var(--l);border-radius:18px;padding:15px;margin:10px 0}h2{font-size:12px;color:var(--m);letter-spacing:.12em;text-transform:uppercase;margin:0 0 10px}
+button,textarea,input{font:inherit;border:1px solid var(--l);background:var(--p2);color:var(--t);padding:10px;border-radius:11px}button{font-weight:800}textarea{width:100%;min-height:110px;font-family:monospace;font-size:10px}.row{display:flex;gap:7px;flex-wrap:wrap}.primary,.active{border-color:var(--g);background:#12362a}.danger{border-color:#6a2d34;color:#ffc4c8}.badge{display:inline-flex;padding:5px 8px;border:1px solid var(--l);border-radius:999px;font-size:10px;color:var(--m)}
+.pttw{position:fixed;left:0;right:0;bottom:0;padding:10px 14px max(14px,env(safe-area-inset-bottom));background:#080b0df7}.ptt{width:min(732px,100%);height:72px;display:block;margin:auto;border:0;background:var(--g);color:#04110c;font-size:16px;font-weight:950}.ptt.talking{background:var(--r);color:white}
+</style>
+</head>
+<body>
+<main class="app">
+<header><div class="brand">FOSA LOCAL <span class="small">β</span></div><button onclick="location.href='./'">RETOUR</button></header>
+<section class="card"><h2>Mode local hors Internet</h2><p class="small">Pour deux appareils sur le même Wi‑Fi / hotspot local. Aucun serveur FOSA ni Supabase n'est nécessaire après chargement de cette page. Le pairage se fait manuellement avec un code offre/réponse.</p><div class="row"><span id="state" class="badge">NON CONNECTÉ</span><span id="path" class="badge">LAN</span></div></section>
+<section class="card"><h2>1 · Hôte</h2><button id="offerBtn" class="primary">CRÉER UNE OFFRE</button><button id="copyOffer">COPIER</button><textarea id="offerOut" placeholder="Le code d'offre apparaîtra ici"></textarea></section>
+<section class="card"><h2>2 · Invité</h2><textarea id="offerIn" placeholder="Coller ici le code d'offre reçu"></textarea><div class="row"><button id="answerBtn" class="primary">ACCEPTER L'OFFRE</button><button id="copyAnswer">COPIER LA RÉPONSE</button></div><textarea id="answerOut" placeholder="Le code de réponse apparaîtra ici"></textarea></section>
+<section class="card"><h2>3 · Hôte</h2><textarea id="answerIn" placeholder="Coller ici le code de réponse de l'invité"></textarea><button id="applyBtn" class="primary">APPLIQUER LA RÉPONSE</button></section>
+<section class="card"><h2>Audio</h2><div class="row"><button id="gate" class="active">GATE ON</button><span class="badge" id="gateVal">-48 dB</span><button id="anti" class="active">ANTI-LARSEN ON</button></div><input id="thr" type="range" min="-70" max="-25" value="-48" style="width:100%;margin-top:10px"><p id="diag" class="small">Le flux RTP reste ouvert ; TALK ouvre uniquement le gain audio.</p></section>
+</main>
+<div id="audio" style="position:fixed;width:1px;height:1px;opacity:.01"></div>
+<div class="pttw"><button id="ptt" class="ptt" disabled>MAINTENIR POUR PARLER</button></div>
+<script>
+const $=s=>document.querySelector(s);let pc,stream,ctx,src,gateNode,bus,gain,dest,remoteAudio,talking=false,gateOn=true,anti=true;
+const E={state:$('#state'),path:$('#path'),offerOut:$('#offerOut'),offerIn:$('#offerIn'),answerOut:$('#answerOut'),answerIn:$('#answerIn'),offerBtn:$('#offerBtn'),answerBtn:$('#answerBtn'),applyBtn:$('#applyBtn'),copyOffer:$('#copyOffer'),copyAnswer:$('#copyAnswer'),ptt:$('#ptt'),audio:$('#audio'),gate:$('#gate'),gateVal:$('#gateVal'),thr:$('#thr'),anti:$('#anti'),diag:$('#diag')};
+const enc=o=>btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(o))));
+const dec=s=>JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.trim()),c=>c.charCodeAt(0))));
+async function initAudio(){if(stream)return;stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,sampleRate:48000,latency:0,noiseSuppression:false,autoGainControl:false,echoCancellation:false},video:false});ctx=new(window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive',sampleRate:48000});await ctx.resume();src=ctx.createMediaStreamSource(stream);bus=src;try{await ctx.audioWorklet.addModule('./gate-processor.js');gateNode=new AudioWorkletNode(ctx,'fosa-gate',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1]});src.connect(gateNode);bus=gateNode;updateGate()}catch{}}
+function updateGate(){E.gate.classList.toggle('active',gateOn);E.gate.textContent='GATE '+(gateOn?'ON':'OFF');E.gateVal.textContent=E.thr.value+' dB';try{gateNode.parameters.get('enabled').setValueAtTime(gateOn?1:0,ctx.currentTime);gateNode.parameters.get('thresholdDb').setValueAtTime(Number(E.thr.value),ctx.currentTime)}catch{}}
+E.gate.onclick=()=>{gateOn=!gateOn;updateGate()};E.thr.oninput=updateGate;E.anti.onclick=()=>{anti=!anti;E.anti.classList.toggle('active',anti);E.anti.textContent='ANTI-LARSEN '+(anti?'ON':'OFF');applyPlayback()};
+function applyPlayback(){if(remoteAudio)remoteAudio.muted=anti&&talking}
+async function makePc(){await initAudio();if(pc)return pc;pc=new RTCPeerConnection({iceServers:[]});gain=ctx.createGain();gain.gain.value=0;dest=ctx.createMediaStreamDestination();bus.connect(gain);gain.connect(dest);pc.addTrack(dest.stream.getAudioTracks()[0],dest.stream);remoteAudio=document.createElement('audio');remoteAudio.autoplay=true;remoteAudio.playsInline=true;E.audio.appendChild(remoteAudio);pc.ontrack=e=>{remoteAudio.srcObject=e.streams[0]||new MediaStream([e.track]);remoteAudio.play().catch(()=>{})};pc.onconnectionstatechange=()=>{E.state.textContent=pc.connectionState.toUpperCase();E.ptt.disabled=pc.connectionState!=='connected'};pc.oniceconnectionstatechange=()=>{E.path.textContent=pc.iceConnectionState.toUpperCase()};return pc}
+function waitIce(p){if(p.iceGatheringState==='complete')return Promise.resolve();return new Promise(r=>{const f=()=>{if(p.iceGatheringState==='complete'){p.removeEventListener('icegatheringstatechange',f);r()}};p.addEventListener('icegatheringstatechange',f);setTimeout(r,3500)})}
+E.offerBtn.onclick=async()=>{try{const p=await makePc();const d=await p.createOffer();await p.setLocalDescription(d);await waitIce(p);E.offerOut.value=enc({description:p.localDescription})}catch(e){E.diag.textContent=e.message}};
+E.answerBtn.onclick=async()=>{try{const p=await makePc(),o=dec(E.offerIn.value);await p.setRemoteDescription(o.description);const d=await p.createAnswer();await p.setLocalDescription(d);await waitIce(p);E.answerOut.value=enc({description:p.localDescription})}catch(e){E.diag.textContent=e.message}};
+E.applyBtn.onclick=async()=>{try{const p=await makePc(),a=dec(E.answerIn.value);await p.setRemoteDescription(a.description)}catch(e){E.diag.textContent=e.message}};
+E.copyOffer.onclick=()=>navigator.clipboard.writeText(E.offerOut.value);E.copyAnswer.onclick=()=>navigator.clipboard.writeText(E.answerOut.value);
+async function start(){if(!pc||pc.connectionState!=='connected'||talking)return;if(ctx.state==='suspended')ctx.resume();talking=true;gain.gain.setValueAtTime(1,ctx.currentTime);applyPlayback();E.ptt.classList.add('talking');E.ptt.textContent='PARLEZ…'}
+function stop(){if(!talking)return;talking=false;gain.gain.setValueAtTime(0,ctx.currentTime);applyPlayback();E.ptt.classList.remove('talking');E.ptt.textContent='MAINTENIR POUR PARLER'}
+E.ptt.onpointerdown=e=>{e.preventDefault();start()};addEventListener('pointerup',stop);document.addEventListener('pointerdown',()=>ctx?.resume().catch(()=>{}),{passive:true});
+</script>
+</body>
+</html>
