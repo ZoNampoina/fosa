@@ -1,0 +1,29 @@
+name: Fix FOSA latency selector
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-latency-selector.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make latency profiles directly switchable
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          s=s.replace('v0.3.0','v0.3.1')
+          s=s.replace("function setLat(x){if(joined)return;lat=x;localStorage.fosa_latency=x;[...E.lat.children].forEach(b=>b.classList.toggle('active',b.dataset.l===x));E.latInfo.textContent=profiles[x].info}","function setLat(x){if(!profiles[x])return;lat=x;localStorage.fosa_latency=x;[...E.lat.querySelectorAll('[data-l]')].forEach(b=>{const on=b.dataset.l===x;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});E.latInfo.textContent=profiles[x].info+(joined?' · Ce profil sera appliqué à la prochaine connexion.':'')}")
+          s=s.replace("E.lat.onclick=e=>{const b=e.target.closest('[data-l]');if(b)setLat(b.dataset.l)};setLat(lat);","E.lat.querySelectorAll('[data-l]').forEach(b=>{b.type='button';b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();setLat(b.dataset.l)})});setLat(lat);")
+          p.write_text(s)
+          PY
+          git config user.name 'FOSA Deploy Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add index.html
+          git diff --cached --quiet || git commit -m 'Fix clickable ULTRA LOW STABLE selector'
+          git push
