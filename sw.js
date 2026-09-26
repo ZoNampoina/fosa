@@ -1,4 +1,4 @@
-const CACHE='fosa-v0.5.0';
+const CACHE='fosa-v0.5.1';
 const CORE=['./','./index.html','./local.html','./manifest.webmanifest','./gate-processor.js'];
 const CDN='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);await c.addAll(CORE);try{await c.add(CDN)}catch{}await self.skipWaiting()})()));
