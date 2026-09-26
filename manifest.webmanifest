@@ -1,0 +1,9 @@
+{
+  "name":"FOSA — Talkback Live",
+  "short_name":"FOSA",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#080b0d",
+  "theme_color":"#080b0d",
+  "description":"Intercom vocal Push-to-Talk pour musiciens."
+}
