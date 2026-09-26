@@ -1,5 +1,5 @@
-const CACHE='fosa-v0.4.1';
-const CORE=['./','./index.html','./manifest.webmanifest','./gate-processor.js'];
+const CACHE='fosa-v0.5.0';
+const CORE=['./','./index.html','./local.html','./manifest.webmanifest','./gate-processor.js'];
 const CDN='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);await c.addAll(CORE);try{await c.add(CDN)}catch{}await self.skipWaiting()})()));
 self.addEventListener('activate',e=>e.waitUntil((async()=>{const ks=await caches.keys();await Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim()})()));
