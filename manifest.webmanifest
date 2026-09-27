@@ -3,7 +3,10 @@
   "short_name":"FOSA",
   "start_url":"./",
   "display":"standalone",
-  "background_color":"#080b0d",
-  "theme_color":"#080b0d",
-  "description":"Intercom vocal Push-to-Talk pour musiciens."
+  "background_color":"#07090b",
+  "theme_color":"#07090b",
+  "description":"Intercom vocal Push-to-Talk pour musiciens.",
+  "icons":[
+    {"src":"./fosa-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
 }
