@@ -16,7 +16,7 @@ button,textarea,input{font:inherit;border:1px solid var(--l);background:var(--p2
 </head>
 <body>
 <main class="app">
-<header><div class="brand">FOSA LOCAL <span class="small">β</span></div><button onclick="location.href='./'">RETOUR</button></header>
+<header><div class="brand">FOSA LOCAL <span class="small">v0.5.2</span></div><button onclick="location.href='./'">RETOUR</button></header>
 <section class="card"><h2>Mode local hors Internet</h2><p class="small">Pour deux appareils sur le même Wi‑Fi / hotspot local. Aucun serveur FOSA ni Supabase n'est nécessaire après chargement de cette page. Le pairage se fait manuellement avec un code offre/réponse.</p><div class="row"><span id="state" class="badge">NON CONNECTÉ</span><span id="path" class="badge">LAN</span></div></section>
 <section class="card"><h2>1 · Hôte</h2><button id="offerBtn" class="primary">CRÉER UNE OFFRE</button><button id="copyOffer">COPIER</button><textarea id="offerOut" placeholder="Le code d'offre apparaîtra ici"></textarea><div id="offerQr" class="qrbox" aria-label="QR code de l\'offre"></div><p id="qrHint" class="small" style="display:none;text-align:center">Scanner ce QR code depuis l\'appareil invité.</p></section>
 <section class="card"><h2>2 · Invité</h2><textarea id="offerIn" placeholder="Coller ici le code d'offre reçu"></textarea><div class="row"><button id="answerBtn" class="primary">ACCEPTER L'OFFRE</button><button id="copyAnswer">COPIER LA RÉPONSE</button></div><textarea id="answerOut" placeholder="Le code de réponse apparaîtra ici"></textarea></section>
