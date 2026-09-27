@@ -8,6 +8,9 @@ on:
       - '.github/workflows/android-apk.yml'
 permissions:
   contents: write
+concurrency:
+  group: fosa-android-release
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
