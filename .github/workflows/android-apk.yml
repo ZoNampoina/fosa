@@ -7,7 +7,7 @@ on:
       - 'native/android/**'
       - '.github/workflows/android-apk.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,7 +23,15 @@ jobs:
       - name: Build debug APK
         working-directory: native/android
         run: gradle assembleDebug
+      - name: Prepare named APK
+        run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.6.0
-          path: native/android/app/build/outputs/apk/debug/app-debug.apk
+          name: FOSA-Android-v0.6.1
+          path: FOSA-Android.apk
+      - name: Publish stable Android download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --cleanup-tag -y || true
+          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.6.1" --notes "FOSA Android local native preview. Stable download URL for in-app QR sharing." --latest
