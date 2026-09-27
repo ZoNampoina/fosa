@@ -1,0 +1,11 @@
+<resources>
+  <color name="fosa_bg">#07090B</color>
+  <color name="fosa_card">#101419</color>
+  <color name="fosa_card2">#151A20</color>
+  <color name="fosa_line">#242B32</color>
+  <color name="fosa_text">#F3F6F8</color>
+  <color name="fosa_muted">#8C98A2</color>
+  <color name="fosa_green">#25D394</color>
+  <color name="fosa_green_soft">#12372B</color>
+  <color name="fosa_red">#FF5B68</color>
+</resources>
