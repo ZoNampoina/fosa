@@ -36,3 +36,20 @@ Le pont natif expose :
 - transport.onAudio(...)
 
 La PWA actuelle reste le fallback Internet/WebRTC.
+
+
+## Local group discovery (v0.6.0)
+
+The Android local transport now uses Nearby Connections with `P2P_CLUSTER`.
+
+User flow:
+- Host: **CRÉER UN GROUPE**
+- Other devices: **REJOINDRE**
+- Nearby FOSA groups are discovered automatically.
+- No camera, QR, SDP copy/paste, or Internet signalling is part of the native local flow.
+- The host keeps advertising after a peer joins so multiple musicians can connect to the same group.
+- `broadcast()` sends control/audio payloads to all currently connected peers.
+
+The browser PWA cannot expose the same automatic LAN/Bluetooth discovery reliably. `local.html` remains a compatibility/fallback implementation; the native Android shell must bridge the UI to `NearbyTransport`.
+
+Android permissions and Google Play Services Nearby requirements must be declared by the native application before packaging.
