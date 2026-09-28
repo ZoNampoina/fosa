@@ -3,6 +3,7 @@ package com.arizona.fosa
 import android.Manifest
 import android.app.Activity
 import android.os.Bundle
+import android.os.Build
 import android.graphics.Color
 import android.graphics.Bitmap
 import android.graphics.Typeface
@@ -19,6 +20,7 @@ class MainActivity : Activity(), NearbyTransport.Listener {
   private lateinit var transport: NearbyTransport
   private lateinit var status: TextView
   private lateinit var peers: TextView
+  private lateinit var backgroundState: TextView
   private val names = linkedMapOf<String,String>()
   private val downloadUrl = "https://github.com/ZoNampoina/fosa/releases/latest/download/FOSA-Android.apk"
   private val webUrl = "https://zonampoina.github.io/fosa/"
@@ -53,7 +55,7 @@ class MainActivity : Activity(), NearbyTransport.Listener {
     header.addView(logo, LinearLayout.LayoutParams(dp(54),dp(54)).apply { marginEnd=dp(12) })
     val brand = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
     brand.addView(label("FOSA",26f,textColor,true))
-    brand.addView(label("TALKBACK LIVE  ·  v0.6.1",10f,muted,true))
+    brand.addView(label("TALKBACK LIVE  ·  v0.8.0",10f,muted,true))
     header.addView(brand,LinearLayout.LayoutParams(0,-2,1f))
     root.addView(header)
 
@@ -61,6 +63,8 @@ class MainActivity : Activity(), NearbyTransport.Listener {
     connect.addView(section("CONNEXION LOCALE"))
     status = label("LOCAL NATIF · prêt",13f,green,true)
     connect.addView(status)
+    backgroundState = label("ARRIÈRE-PLAN · se lance avec la session",11f,muted,false)
+    connect.addView(backgroundState, blockParams(dp(3)))
     val name = EditText(this).apply {
       hint="Votre nom"
       setTextColor(textColor)
@@ -76,7 +80,7 @@ class MainActivity : Activity(), NearbyTransport.Listener {
     connect.addView(join, blockParams(dp(7)))
     peers=label("Aucun appareil connecté",14f,textColor,false)
     connect.addView(peers, blockParams(dp(10)))
-    connect.addView(label("Les appareils FOSA proches se détectent automatiquement. Aucun QR n’est nécessaire pour rejoindre le groupe.",12f,muted,false))
+    connect.addView(label("Les appareils FOSA proches se détectent automatiquement. La notification FOSA reste active lorsque vous ouvrez une autre application.",12f,muted,false))
     root.addView(connect, blockParams(dp(4)))
 
     val share = cardBox()
@@ -93,28 +97,43 @@ class MainActivity : Activity(), NearbyTransport.Listener {
     share.addView(qr, LinearLayout.LayoutParams(-1,dp(300)).apply { topMargin=dp(12) })
     val browser=actionButton("OUVRIR FOSA DANS LE NAVIGATEUR", false)
     share.addView(browser, blockParams(dp(10)))
-    share.addView(label("iPhone / iPad : ouvrir FOSA dans Safari. Android : application native recommandée pour la découverte locale.",11f,muted,false))
+    share.addView(label("iPhone / iPad : ouvrir FOSA dans Safari. Android : application native recommandée pour le maintien de la session locale en arrière-plan.",11f,muted,false))
     root.addView(share, blockParams(dp(10)))
 
     setContentView(ScrollView(this).apply { setBackgroundColor(bg); addView(root) })
 
-    requestPermissions(arrayOf(
+    val permissions = mutableListOf(
       Manifest.permission.RECORD_AUDIO,
       Manifest.permission.BLUETOOTH_SCAN,
       Manifest.permission.BLUETOOTH_ADVERTISE,
       Manifest.permission.BLUETOOTH_CONNECT,
       Manifest.permission.NEARBY_WIFI_DEVICES
-    ),10)
+    )
+    if (Build.VERSION.SDK_INT >= 33) permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+    requestPermissions(permissions.toTypedArray(),10)
 
     host.setOnClickListener {
+      startPersistentService()
       transport.createGroup(name.text.toString().ifBlank{"FOSA"})
       status.text="GROUPE VISIBLE · en attente…"
+      backgroundState.text="ARRIÈRE-PLAN ACTIF · notification permanente"
+      backgroundState.setTextColor(green)
     }
     join.setOnClickListener {
+      startPersistentService()
       transport.discoverGroups(name.text.toString().ifBlank{"Musicien"})
       status.text="RECHERCHE DES FOSA PROCHES…"
+      backgroundState.text="ARRIÈRE-PLAN ACTIF · notification permanente"
+      backgroundState.setTextColor(green)
     }
     browser.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))) }
+  }
+
+  private fun startPersistentService() {
+    val intent = Intent(this, FosaForegroundService::class.java).apply {
+      action = FosaForegroundService.ACTION_START
+    }
+    startForegroundService(intent)
   }
 
   private fun dp(v:Int)= (v*resources.displayMetrics.density).toInt()
@@ -160,5 +179,12 @@ class MainActivity : Activity(), NearbyTransport.Listener {
   override fun onPeerDisconnected(id:String){ names.remove(id); runOnUiThread{status.text=if(names.isEmpty())"LOCAL NATIF · prêt" else "CONNECTÉ · ${names.size} appareil(s)"}; refresh() }
   override fun onPayload(id:String,bytes:ByteArray)=Unit
   override fun onError(message:String){ runOnUiThread{status.text=message} }
-  override fun onDestroy(){ transport.stop(); super.onDestroy() }
+
+  override fun onDestroy(){
+    if(isFinishing){
+      transport.stop()
+      stopService(Intent(this,FosaForegroundService::class.java))
+    }
+    super.onDestroy()
+  }
 }
