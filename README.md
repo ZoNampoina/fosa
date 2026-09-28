@@ -46,3 +46,13 @@ Le Bluetooth appareil-à-appareil n'est pas disponible comme transport audio dir
 - interface LIVE séparée avec switches OUT / IN / MIC
 - interface MENU séparée pour session et réglages avancés
 - publication automatique des sessions hôtes via Supabase Presence
+
+
+## v0.8.0
+- profils, rôles et groupes personnalisés
+- console Chef et PTT direct par destination
+- favoris, appel Chef, verrouillage Concert et modes Répétition/Concert
+- test pré-live, QR de session, historique et qualité simplifiée
+- commandes distantes IN/OUT/MIC protégées par verrouillage admin local
+- restauration de session, état I/O mémorisé et délai de reconnexion participants
+- notification de session active côté PWA, avec service Android persistant prévu pour l'arrière-plan natif
