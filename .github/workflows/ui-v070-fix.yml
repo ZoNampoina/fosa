@@ -1,0 +1,31 @@
+name: Fix FOSA v0.7.0 lobby syntax
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ui-v070-fix.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix escaped template literal
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path("index.html")
+          c=p.read_text()
+          c=c.replace("x=>\\`<div class=\"hostItem\">","x=>`<div class=\"hostItem\">")
+          c=c.replace("</button></div>\\`).join('')","</button></div>`).join('')")
+          c=c.replace("\\${esc(","${esc(")
+          p.write_text(c)
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name "FOSA Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git commit -m "Fix FOSA v0.7.0 lobby syntax" || exit 0
+          git push
