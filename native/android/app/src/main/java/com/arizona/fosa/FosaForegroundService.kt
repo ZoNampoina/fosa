@@ -41,7 +41,7 @@ class FosaForegroundService : Service() {
     }
 
     val openIntent = Intent(this, MainActivity::class.java).apply {
-      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+      this.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
     val openPending = PendingIntent.getActivity(
       this, 1, openIntent,
