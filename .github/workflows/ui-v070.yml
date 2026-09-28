@@ -1,0 +1,165 @@
+name: Apply FOSA v0.7.0 UI
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ui-v070.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch interface
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("index.html")
+          c = p.read_text()
+
+          def rep(old, new, label):
+              global c
+              if old not in c:
+                  raise SystemExit(f"Patch introuvable: {label}")
+              c = c.replace(old, new, 1)
+
+          rep(
+          ".ptt.talking{background:var(--red);color:#fff;box-shadow:0 10px 30px rgba(255,91,104,.14)}",
+          """.ptt.talking{background:var(--red);color:#fff;box-shadow:0 10px 30px rgba(255,91,104,.14)}
+          .setupOnly{}.livePage,.menuPage,.postNav{display:none}.joined.page-live .livePage{display:block}.joined.page-menu .menuPage{display:block}.joined .postNav{display:grid}.joined .setupOnly{display:none!important}
+          .postNav{grid-template-columns:1fr 1fr;gap:6px;position:sticky;top:6px;z-index:15;padding:5px;margin:0 0 10px;background:rgba(16,20,25,.94);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:15px}.postNav button{padding:9px}.postNav button.active{background:var(--green-soft);border-color:var(--green);color:#e5fff5}
+          .modeGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.modeChoice{min-height:62px;text-align:left}.modeChoice b{display:block;font-size:12px}.modeChoice span{display:block;font-size:9px;color:var(--muted);font-weight:500;margin-top:3px}
+          .scanWrap{margin:9px 0 0;padding:10px;border-radius:14px;border:1px solid var(--line);background:#0b0f13}.scanHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}.scanHead b{font-size:11px}.scanHead button{padding:7px 10px;font-size:10px}.hostList{display:grid;gap:6px}.hostItem{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid #1c2329;border-radius:12px;padding:9px 10px;background:#0f1418}.hostItem b{font-size:12px}.hostItem button{padding:7px 9px;font-size:10px}.hostMeta{font-size:9px;color:var(--muted);margin-top:2px}
+          .ioGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.ioToggle{padding:12px 8px;text-align:center}.ioToggle b{display:block;font-size:11px}.ioToggle span{display:block;font-size:9px;color:var(--muted);margin-top:3px}.ioToggle.active span{color:#c8ffe9}.liveStatus{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:9px;padding:9px 10px;background:#0b0f13;border-radius:12px}.liveStatus b{font-size:12px}
+          .menuSession{display:grid;gap:8px}.menuLine{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #1c2329}.menuLine:last-child{border-bottom:0}.menuLine span{font-size:10px;color:var(--muted)}.menuLine b{font-size:11px;text-align:right}.joined.page-menu .app{padding-bottom:24px}.joined.page-menu .pttw{display:none!important}""",
+          "css")
+
+          rep('<span>FOSA <span class="ver">v0.6.1</span></span>','<span>FOSA <span class="ver">v0.7.0</span></span>',"version")
+
+          rep(
+          '</header>\n\n<section class="card">',
+          '''</header>
+
+          <nav id="postNav" class="postNav">
+            <button type="button" data-page="live" class="active">LIVE</button>
+            <button type="button" data-page="menu">MENU</button>
+          </nav>
+
+          <section class="card setupOnly">
+            <h2>Mode</h2>
+            <div class="modeGrid">
+              <button id="modeHost" type="button" class="modeChoice"><b>HÉBERGER</b><span>Créer et publier une session</span></button>
+              <button id="modeJoin" type="button" class="modeChoice active"><b>REJOINDRE</b><span>Scanner les sessions disponibles</span></button>
+            </div>
+          </section>
+
+          <section class="card setupOnly">''',
+          "mode")
+
+          rep('  <h2>Connexion</h2>','  <h2>Identité & session</h2>',"title")
+
+          rep(
+          '''  </div>
+            <div class="sessionRow">
+              <input id="room" maxlength="8" placeholder="CODE SESSION">''',
+          '''  </div>
+            <div id="scanWrap" class="scanWrap">
+              <div class="scanHead"><b>Hébergements détectés</b><button id="scan" type="button">SCAN</button></div>
+              <div id="hosts" class="hostList"><span class="small">Recherche des sessions…</span></div>
+            </div>
+            <div id="hostHint" class="scanWrap hidden"><div class="small">Votre session sera visible automatiquement aux autres appareils après démarrage.</div></div>
+            <div class="sessionRow" style="margin-top:9px">
+              <input id="room" maxlength="8" placeholder="CODE SESSION">''',
+          "scan")
+
+          rep(
+          '<section class="card targetCard">',
+          '''<section class="card livePage">
+            <h2>Interface live</h2>
+            <div class="ioGrid">
+              <button id="outToggle" type="button" class="ioToggle active"><b>OUT</b><span>sortie ON</span></button>
+              <button id="inToggle" type="button" class="ioToggle active"><b>IN</b><span>écoute ON</span></button>
+              <button id="micToggle" type="button" class="ioToggle active"><b>MIC</b><span>micro ON</span></button>
+            </div>
+            <div class="liveStatus"><span class="small">Session active</span><b id="liveRoom">—</b></div>
+          </section>
+
+          <section class="card targetCard livePage">''',
+          "live")
+
+          rep(
+          '<section class="card">\n  <h2>Participants <span id="count" class="ver">0</span></h2>',
+          '<section class="card livePage">\n  <h2>Participants <span id="count" class="ver">0</span></h2>',
+          "participants")
+
+          rep(
+          '<details class="advanced">',
+          '''<section class="card menuPage">
+            <h2>Session</h2>
+            <div class="menuSession">
+              <div class="menuLine"><span>Code</span><b id="menuRoom">—</b></div>
+              <div class="menuLine"><span>Nom</span><b id="menuName">—</b></div>
+              <div class="menuLine"><span>Rôle</span><b id="menuRole">—</b></div>
+              <div class="menuLine"><span>Mode</span><b id="menuMode">—</b></div>
+              <button id="menuLeave" type="button" class="danger">QUITTER LA SESSION</button>
+            </div>
+          </section>
+
+          <details class="advanced menuPage">''',
+          "menu")
+
+          rep('<div class="pttw"><div class="modes">','<div class="pttw livePage"><div class="modes">',"ptt")
+          rep("lastLoss=0;const E={","lastLoss=0,outEnabled=true,inEnabled=true,micEnabled=true,uiMode=localStorage.fosa_mode||'join',lobby=null,hosting=false;const E={","vars")
+          rep("audioLat:$('#audioLat')};E.name.value","audioLat:$('#audioLat'),modeHost:$('#modeHost'),modeJoin:$('#modeJoin'),scanWrap:$('#scanWrap'),scan:$('#scan'),hosts:$('#hosts'),hostHint:$('#hostHint'),postNav:$('#postNav'),outToggle:$('#outToggle'),inToggle:$('#inToggle'),micToggle:$('#micToggle'),liveRoom:$('#liveRoom'),menuRoom:$('#menuRoom'),menuName:$('#menuName'),menuRole:$('#menuRole'),menuMode:$('#menuMode'),menuLeave:$('#menuLeave')};E.name.value","refs")
+
+          rep(
+          "E.role.value=localStorage.fosa_role||'Chef';const FALLBACK_ICE=",
+          """E.role.value=localStorage.fosa_role||'Chef';
+          const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+          const lobbyHosts=new Map;
+          function renderHosts(){const hosts=[...lobbyHosts.values()].filter(x=>x.peerId!==id&&x.room);E.hosts.innerHTML=hosts.length?hosts.map(x=>\`<div class="hostItem"><div><b>\${esc(x.name||'Hôte')}</b><div class="hostMeta">\${esc(x.role||'—')} · \${esc(x.room)}</div></div><button type="button" data-host-room="\${esc(x.room)}">REJOINDRE</button></div>\`).join(''):'<span class="small">Aucun hébergement détecté pour le moment.</span>'}
+          async function advertiseLobby(){if(!lobby)return;try{await lobby.track(hosting?{type:'host',peerId:id,room:E.room.value,name:E.name.value.trim()||'Hôte',role:E.role.value,ts:Date.now()}:{type:'viewer',peerId:id,ts:Date.now()})}catch{}}
+          function startLobby(){lobby=S.channel('fosa-lobby',{config:{presence:{key:id}}});lobby.on('presence',{event:'sync'},()=>{lobbyHosts.clear();for(const arr of Object.values(lobby.presenceState()))for(const x of arr)if(x?.type==='host'&&x.peerId)lobbyHosts.set(x.peerId,x);renderHosts()});lobby.subscribe(async s=>{if(s==='SUBSCRIBED')await advertiseLobby()})}
+          function setUiMode(mode){uiMode=mode==='host'?'host':'join';localStorage.fosa_mode=uiMode;E.modeHost.classList.toggle('active',uiMode==='host');E.modeJoin.classList.toggle('active',uiMode==='join');E.scanWrap.classList.toggle('hidden',uiMode==='host');E.hostHint.classList.toggle('hidden',uiMode!=='host');E.join.textContent=uiMode==='host'?'DÉMARRER LIVE':'REJOINDRE';if(uiMode==='host'&&!E.room.value)E.gen.click()}
+          function showPage(page){document.body.classList.remove('page-live','page-menu');document.body.classList.add(page==='menu'?'page-menu':'page-live');E.postNav.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===(page==='menu'?'menu':'live')))}
+          function updateIoUi(){E.outToggle.classList.toggle('active',outEnabled);E.inToggle.classList.toggle('active',inEnabled);E.micToggle.classList.toggle('active',micEnabled);E.outToggle.querySelector('span').textContent='sortie '+(outEnabled?'ON':'OFF');E.inToggle.querySelector('span').textContent='écoute '+(inEnabled?'ON':'OFF');E.micToggle.querySelector('span').textContent='micro '+(micEnabled?'ON':'OFF');stream?.getAudioTracks?.().forEach(t=>t.enabled=micEnabled);if((!outEnabled||!micEnabled)&&talking)stop();E.ptt.disabled=!joined||!outEnabled||!micEnabled;applyPlayback();route()}
+          E.modeHost.onclick=()=>setUiMode('host');E.modeJoin.onclick=()=>setUiMode('join');E.scan.onclick=()=>{E.scan.textContent='SCAN…';renderHosts();setTimeout(()=>E.scan.textContent='SCAN',500)};E.hosts.onclick=e=>{const b=e.target.closest('[data-host-room]');if(!b)return;E.room.value=b.dataset.hostRoom;setUiMode('join')};E.postNav.onclick=e=>{const b=e.target.closest('[data-page]');if(b)showPage(b.dataset.page)};E.outToggle.onclick=()=>{outEnabled=!outEnabled;updateIoUi()};E.inToggle.onclick=()=>{inEnabled=!inEnabled;updateIoUi()};E.micToggle.onclick=()=>{micEnabled=!micEnabled;updateIoUi()};
+          setUiMode(uiMode);startLobby();
+          const FALLBACK_ICE=""",
+          "logic")
+
+          rep("p.a.muted=!p.listen||(antiLarsen&&talking);","p.a.muted=!inEnabled||!p.listen||(antiLarsen&&talking);","in")
+          rep("const m=M.get(rid),open=talking&&!!m&&includes(m);","const m=M.get(rid),open=outEnabled&&micEnabled&&talking&&!!m&&includes(m);","out")
+          rep("async function start(){if(!joined||talking)return;","async function start(){if(!joined||talking||!outEnabled||!micEnabled)return;","start")
+
+          rep(
+          "if(s==='SUBSCRIBED'){const first=!joined;joined=true;await ch.track(me()).catch(()=>{});E.join.classList.add('hidden');E.leave.classList.remove('hidden');E.ptt.disabled=false;E.state.textContent='connecté · '+E.room.value;",
+          "if(s==='SUBSCRIBED'){const first=!joined;joined=true;await ch.track(me()).catch(()=>{});hosting=uiMode==='host';await advertiseLobby();document.body.classList.add('joined');showPage('live');E.join.classList.add('hidden');E.leave.classList.remove('hidden');E.liveRoom.textContent=E.room.value;E.menuRoom.textContent=E.room.value;E.menuName.textContent=E.name.value.trim()||'Musicien';E.menuRole.textContent=E.role.value;E.menuMode.textContent=hosting?'HÉBERGEUR':'PARTICIPANT';updateIoUi();E.state.textContent='connecté · '+E.room.value;",
+          "joined")
+
+          rep("async function leave(){stop();joined=false;","async function leave(){stop();joined=false;hosting=false;await advertiseLobby();document.body.classList.remove('joined','page-live','page-menu');","leave")
+          rep("E.join.onclick=join;E.leave.onclick=leave;","E.join.onclick=join;E.leave.onclick=leave;E.menuLeave.onclick=leave;","leave button")
+
+          p.write_text(c)
+
+          sw = Path("sw.js")
+          s = sw.read_text()
+          s = s.replace("const CACHE='fosa-v0.5.8';","const CACHE='fosa-v0.7.0';")
+          sw.write_text(s)
+
+          readme = Path("README.md")
+          r = readme.read_text()
+          if "## v0.7.0" not in r:
+              r += """\n\n## v0.7.0\n- écran de préparation : choix Héberger/Rejoindre, nom, rôle et scan des hébergements\n- interface LIVE séparée avec switches OUT / IN / MIC\n- interface MENU séparée pour session et réglages avancés\n- publication automatique des sessions hôtes via Supabase Presence\n"""
+              readme.write_text(r)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name "FOSA Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html sw.js README.md
+          git commit -m "FOSA v0.7.0 interface workflow" || exit 0
+          git push
