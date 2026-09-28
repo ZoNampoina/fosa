@@ -39,3 +39,10 @@ FOSA est un intercom/talkback temps réel pour musiciens.
 Voir `native/README.md` et `native/transport-contract.md`.
 
 Le Bluetooth appareil-à-appareil n'est pas disponible comme transport audio direct depuis la PWA. Les squelettes Android/iOS sont présents dans `native/` pour cette couche.
+
+
+## v0.7.0
+- écran de préparation : choix Héberger/Rejoindre, nom, rôle et scan des hébergements
+- interface LIVE séparée avec switches OUT / IN / MIC
+- interface MENU séparée pour session et réglages avancés
+- publication automatique des sessions hôtes via Supabase Presence
