@@ -30,11 +30,11 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.6.1
+          name: FOSA-Android-v0.8.0
           path: FOSA-Android.apk
       - name: Publish stable Android download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --cleanup-tag -y || true
-          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.6.1" --notes "FOSA Android local native preview. Stable download URL for in-app QR sharing." --latest
+          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.8.0" --notes "FOSA Android v0.8.0: Nearby local transport + persistent foreground notification for live sessions." --latest
