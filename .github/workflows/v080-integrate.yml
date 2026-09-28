@@ -1,0 +1,130 @@
+name: Integrate FOSA v0.8.0
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v080-integrate.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch web engine
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path("index.html")
+          c=p.read_text()
+
+          def rep(old,new,label):
+              global c
+              if old not in c:
+                  raise SystemExit(f"Patch introuvable: {label}")
+              c=c.replace(old,new,1)
+
+          if 'href="./v080.css"' not in c:
+              rep('<link rel="icon" href="./fosa-icon.svg" type="image/svg+xml">',
+                  '<link rel="icon" href="./fosa-icon.svg" type="image/svg+xml"><link rel="stylesheet" href="./v080.css">',
+                  'css link')
+
+          c=c.replace('v0.7.0</span>','v0.8.0</span>')
+
+          rep(
+            "hosting=false;const E={",
+            "hosting=false,lostPeers=new Map;const E={",
+            "lost peers"
+          )
+
+          rep(
+            "if(target.startsWith('peer:')){const m=M.get(target.slice(5));return m?'PERSONNE · '+m.name:'TOUS'}return'TOUS'",
+            "if(target.startsWith('peer:')){const m=M.get(target.slice(5));return m?'PERSONNE · '+m.name:'TOUS'}if(target.startsWith('custom:'))return'GROUPE · '+target.slice(7).toUpperCase();return'TOUS'",
+            "custom target label"
+          )
+
+          rep(
+            "if(target.startsWith('group:'))return(quickGroups[target.slice(6)]||[]).includes(m.role);return false",
+            "if(target.startsWith('group:'))return(quickGroups[target.slice(6)]||[]).includes(m.role);if(target.startsWith('custom:')){try{const gs=JSON.parse(localStorage.fosa_custom_groups||'[]'),g=gs.find(x=>String(x.name).toLowerCase()===target.slice(7).toLowerCase());return !!g&&Array.isArray(g.roles)&&g.roles.includes(m.role)}catch{}}return false",
+            "custom group routing"
+          )
+
+          old_apply = "function applyPlayback(){const chefSpeaking=chefPriority&&[...T].some(rid=>M.get(rid)?.role==='Chef');for(const[rid,p]of P){p.a.muted=!inEnabled||!p.listen||(antiLarsen&&talking);p.a.volume=(chefSpeaking&&M.get(rid)?.role!=='Chef')?0.18:1}}"
+          new_apply = "function applyPlayback(){let priority=['Chef','Sono'];try{const q=JSON.parse(localStorage.fosa_priority_roles||'null');if(Array.isArray(q)&&q.length)priority=q}catch{}let top=999;if(chefPriority)for(const rid of T){const k=priority.indexOf(M.get(rid)?.role);if(k>=0)top=Math.min(top,k)}for(const[rid,p]of P){p.a.muted=!inEnabled||!p.listen||(antiLarsen&&talking);const rk=priority.indexOf(M.get(rid)?.role);p.a.volume=(top<999&&(rk<0||rk>top))?0.18:1}}"
+          rep(old_apply,new_apply,"multi priority")
+
+          old_sync = "for(const rid of [...P.keys()])if(!M.has(rid)){const p=P.get(rid);p.pc.close();p.a.remove();P.delete(rid)}for(const[rid]of M)if(rid!==id&&!P.has(rid)&&id.localeCompare(rid)<0)offer(rid);targets();render()"
+          new_sync = "for(const rid of [...P.keys()])if(!M.has(rid)&&!lostPeers.has(rid)){lostPeers.set(rid,setTimeout(()=>{lostPeers.delete(rid);if(M.has(rid))return;const p=P.get(rid);if(p){p.pc.close();p.a.remove();P.delete(rid);render()}},4000))}for(const[rid]of M){if(lostPeers.has(rid)){clearTimeout(lostPeers.get(rid));lostPeers.delete(rid)}if(rid!==id&&!P.has(rid)&&id.localeCompare(rid)<0)offer(rid)}targets();render()"
+          rep(old_sync,new_sync,"disconnect grace")
+
+          rep(
+            ".on('broadcast',{event:'signal'},({payload})=>handle(payload)).on('broadcast',{event:'ptt'},({payload})=>",
+            ".on('broadcast',{event:'signal'},({payload})=>handle(payload)).on('broadcast',{event:'control'},({payload})=>window.dispatchEvent(new CustomEvent('fosa-control',{detail:payload}))).on('broadcast',{event:'ptt'},({payload})=>",
+            "control channel"
+          )
+
+          marker="if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});"
+          api="""window.FOSA_API={
+            version:'0.8.0',
+            peerId:id,
+            getState:()=>({joined,talking,target,room:E.room.value,name:E.name.value.trim()||'Musicien',role:E.role.value,hosting,lat,effectiveLat,inEnabled,outEnabled,micEnabled}),
+            getParticipants:()=>[...M.values()],
+            setTarget:x=>{target=x||'all';targets();route()},
+            startTalk:start,
+            stopTalk:stop,
+            setIn:v=>{inEnabled=!!v;updateIoUi()},
+            setOut:v=>{outEnabled=!!v;updateIoUi()},
+            setMic:v=>{micEnabled=!!v;updateIoUi()},
+            setPeerListen:(rid,v)=>{const p=P.get(rid);if(p){p.listen=!!v;applyPlayback();render()}},
+            sendControl:payload=>ch?.send({type:'broadcast',event:'control',payload:{...payload,from:id,fromName:E.name.value.trim()||'Musicien',fromRole:E.role.value}}),
+            leave
+          };
+          window.dispatchEvent(new CustomEvent('fosa-ready'));
+          """
+          if "window.FOSA_API={" not in c:
+              rep(marker,api+marker,"public api")
+
+          if 'qrcode.min.js' not in c.split('<script type="module">')[0]:
+              rep('<script type="module">','<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script><script type="module">','qr lib')
+
+          if 'src="./v080.js"' not in c:
+              rep('</body>','<script src="./v080.js" defer></script>\n</body>','addon script')
+
+          p.write_text(c)
+
+          sw=Path("sw.js")
+          s=sw.read_text()
+          import re
+          s=re.sub(r"const CACHE='[^']+';","const CACHE='fosa-v0.8.0';",s,count=1)
+          s=s.replace("'./gate-processor.js',","'./gate-processor.js','./v080.css','./v080.js',")
+          if "notificationclick" not in s:
+              s += """\nself.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil((async()=>{const all=await clients.matchAll({type:'window',includeUncontrolled:true});for(const c of all){if('focus'in c)return c.focus()}if(clients.openWindow)return clients.openWindow('./')})())});\n"""
+          sw.write_text(s)
+
+          rd=Path("README.md")
+          r=rd.read_text()
+          if "## v0.8.0" not in r:
+              r += """\n\n## v0.8.0\n- profils, rôles et groupes personnalisés\n- console Chef et PTT direct par destination\n- favoris, appel Chef, verrouillage Concert et modes Répétition/Concert\n- test pré-live, QR de session, historique et qualité simplifiée\n- commandes distantes IN/OUT/MIC protégées par verrouillage admin local\n- restauration de session, état I/O mémorisé et délai de reconnexion participants\n- notification de session active côté PWA, avec service Android persistant prévu pour l'arrière-plan natif\n"""
+              rd.write_text(r)
+          PY
+      - name: Validate JavaScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          c=Path('index.html').read_text()
+          m=re.search(r'<script type="module">(.*?)</script>',c,re.S)
+          assert m, 'module script missing'
+          js=re.sub(r"^import\{createClient\}from'[^']+';","",m.group(1))
+          Path('/tmp/fosa-module.js').write_text(js)
+          PY
+          node --check /tmp/fosa-module.js
+          node --check v080.js
+      - name: Commit integration
+        run: |
+          git config user.name "FOSA Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html sw.js README.md
+          git commit -m "Integrate FOSA v0.8.0 live controls" || exit 0
+          git push
