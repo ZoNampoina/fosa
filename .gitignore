@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+certs/
+.fosa-audio/
+*.pem
+*.key
+*.p12
+node_modules/

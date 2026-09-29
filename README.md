@@ -56,3 +56,9 @@ Le Bluetooth appareil-à-appareil n'est pas disponible comme transport audio dir
 - commandes distantes IN/OUT/MIC protégées par verrouillage admin local
 - restauration de session, état I/O mémorisé et délai de reconnexion participants
 - notification de session active côté PWA, avec service Android persistant prévu pour l'arrière-plan natif
+
+## v0.9.0 — FOSA Audio Network (expérimental)
+
+Nouveau module intégré : AUDIO, MON MIX, LIVE AUDIO, MATRIX, APPAREILS et DIAGNOSTIC. Capture native 18 entrées, mixage par profil et WebRTC LAN via un bridge local. L’application signale explicitement les sources absentes et les mesures indisponibles.
+
+**Installer le bridge sur le PC USB de la MR18 : [guide Windows / LAN](audio-bridge/README.md).** Essais MR18, téléphones et latence physique requis avant usage live critique. Le talkback FOSA existant est conservé. Cette version ne met pas à jour l’APK Android.
