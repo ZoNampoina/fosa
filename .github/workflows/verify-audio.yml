@@ -34,6 +34,7 @@ jobs:
           python -c "import sys; sys.path.insert(0,'audio-bridge'); from lan import discover; print(discover())"
   browser:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,7 +45,16 @@ jobs:
           node-version: '24'
       - run: python -m pip install -r audio-bridge/requirements.txt
       - run: npm install --prefix "$RUNNER_TEMP/fosa-browser" playwright@1.63.0
-      - run: node "$RUNNER_TEMP/fosa-browser/node_modules/playwright/cli.js" install --with-deps chromium webkit
+      - name: Bound package mirror waits
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99-fosa-ci-timeouts >/dev/null <<'EOF'
+          Acquire::Retries "1";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          EOF
+      - name: Install browser dependencies
+        timeout-minutes: 5
+        run: node "$RUNNER_TEMP/fosa-browser/node_modules/playwright/cli.js" install --with-deps chromium webkit
       - name: Verify actual HTTP audio in browsers
         env:
           NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
