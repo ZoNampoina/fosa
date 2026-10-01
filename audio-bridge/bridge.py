@@ -249,6 +249,20 @@ class Bridge:
         self.profile(req, admin=True)
         return json_response({"devices": self.devices()})
 
+    async def get_meters(self, req):
+        self.profile(req)
+        connected = self.connected()
+        def db(v):
+            return round(20 * np.log10(max(float(v), 1e-6)), 1)
+        channels = [{
+            "active": bool(connected),
+            "rmsDb": db(self.rms[i]) if connected else None,
+            "peakDb": db(self.peaks[i]) if connected else None,
+            "signal": bool(connected and self.rms[i] > 1e-4),
+            "clipping": bool(connected and time.monotonic() - self.clip_at[i] < 2),
+        } for i in range(CHANNELS)]
+        return json_response({"connected": bool(connected), "channels": channels})
+
     async def configure(self, req):
         self.profile(req, admin=True)
         b = await req.json()
@@ -506,7 +520,7 @@ class Bridge:
             return response
         app = web.Application(middlewares=[errors], client_max_size=128*1024)
         app.add_routes([web.get('/api/health', self.health), web.post('/api/join', self.join),
-                        web.get('/api/state', self.get_state), web.get('/api/devices', self.list_devices),
+                        web.get('/api/state', self.get_state), web.get('/api/meters', self.get_meters), web.get('/api/devices', self.list_devices),
                         web.post('/api/configure', self.configure), web.post('/api/channel', self.channels),
                         web.post('/api/mix', self.mix), web.post('/api/matrix', self.matrix),
                         web.post('/api/offer', self.offer), web.post('/api/control', self.control),
