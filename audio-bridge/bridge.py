@@ -33,7 +33,8 @@ from mixer import CHANNELS, RATE, FRAME, clean_mix, default_mix, render_mix
 CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioError,) if sd else ())
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.9.1-jsonfix"
+WINDOWS = os.name == "nt"
+VERSION = "0.9.2-asiofix"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -131,10 +132,19 @@ class Bridge:
         if sd is None:
             return []
         apis = sd.query_hostapis()
-        return [{"id": int(d["index"]), "name": d["name"], "driver": apis[d["hostapi"]]["name"],
-                 "inputs": int(d["max_input_channels"]), "defaultRate": float(d["default_samplerate"]),
-                 "mr18": bool("mr18" in d["name"].lower()), "asio": bool("ASIO" in apis[d["hostapi"]]["name"]) }
-                for d in sd.query_devices() if d["max_input_channels"] > 0]
+        out = []
+        for d in sd.query_devices():
+            if d["max_input_channels"] <= 0:
+                continue
+            driver = apis[d["hostapi"]]["name"]
+            mr18 = "mr18" in d["name"].lower()
+            asio = "ASIO" in driver
+            usable = not (WINDOWS and mr18 and not asio)
+            out.append({"id": int(d["index"]), "name": d["name"], "driver": driver,
+                        "inputs": int(d["max_input_channels"]), "defaultRate": float(d["default_samplerate"]),
+                        "mr18": bool(mr18), "asio": bool(asio), "usable": bool(usable),
+                        "reason": "" if usable else "MR18 multicanal sous Windows : pilote ASIO requis"})
+        return out
 
     def capture(self, data, frames, timing, status):
         # Audio callback: bounded copy only, no file/network I/O or asyncio per sample.
@@ -159,6 +169,8 @@ class Bridge:
         device = next((d for d in devices if d["id"] == device_id), None)
         if not device or device["inputs"] < CHANNELS:
             raise ValueError("Cette interface ne fournit pas 18 entrées simultanées")
+        if WINDOWS and device["mr18"] and not device["asio"]:
+            raise ValueError("MR18 détectée via " + device["driver"] + " : ASIO requis pour les 18 canaux séparés. Installe/active le pilote USB ASIO Midas.")
         self.wanted = {"name": device["name"], "driver": device["driver"]}
         self.buffer = buffer
         extra = sd.AsioSettings(channel_selectors=list(range(CHANNELS))) if device["asio"] else None
@@ -466,7 +478,7 @@ class Bridge:
                         await asyncio.to_thread(sd._terminate)
                         await asyncio.to_thread(sd._initialize)
                         devices = self.devices()
-                        candidates = [d for d in devices if d["inputs"] >= CHANNELS and
+                        candidates = [d for d in devices if d["inputs"] >= CHANNELS and d.get("usable", True) and
                                       ((self.wanted and d["name"] == self.wanted["name"] and d["driver"] == self.wanted["driver"]) or
                                        (not self.wanted and d["mr18"]))]
                         candidates.sort(key=lambda d: not d["asio"])
