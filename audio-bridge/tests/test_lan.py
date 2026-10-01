@@ -1,11 +1,20 @@
 import sys
+import os
+import json
 from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lan import select_adapters, lan_address
+from lan import select_adapters, lan_address, powershell
 
 class LanTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows-only read-only firewall helper test')
+    def test_windows_firewall_helper_runs_without_changing_rules(self):
+        helper=Path(__file__).resolve().parents[1]/'configure-firewall.ps1'
+        quote=lambda s:"'"+str(s).replace("'","''")+"'"
+        result=powershell(f"& {quote(helper)} -Port 64979 -PythonExe {quote(sys.executable)} -Addresses '192.168.50.1' -CheckOnly")
+        self.assertIsInstance(json.loads(result)['ok'],bool)
+
     def test_physical_lan_wins_over_vpn_and_virtual_interfaces(self):
         rows = [
             dict(name='Cloudflare WARP', address='10.1.0.2', metric=1, physical=True),

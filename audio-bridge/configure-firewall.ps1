@@ -22,10 +22,10 @@ if (!$CheckOnly) {
   foreach ($name in @($tcpName, $udpName)) {
     Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
   }
-  New-NetFirewallRule -Name $tcpName -DisplayName 'FOSA · interface LAN' -Direction Inbound -Action Allow -Enabled True `
+  New-NetFirewallRule -Name $tcpName -DisplayName 'FOSA - interface LAN' -Direction Inbound -Action Allow -Enabled True `
     -Program $PythonExe -Protocol TCP -LocalPort $Port -LocalAddress $localAddresses -RemoteAddress LocalSubnet -Profile Any | Out-Null
   # aiortc allocates dynamic UDP ports; application + LAN addresses scope the permission.
-  New-NetFirewallRule -Name $udpName -DisplayName 'FOSA · audio WebRTC LAN' -Direction Inbound -Action Allow -Enabled True `
+  New-NetFirewallRule -Name $udpName -DisplayName 'FOSA - audio WebRTC LAN' -Direction Inbound -Action Allow -Enabled True `
     -Program $PythonExe -Protocol UDP -LocalAddress $localAddresses -RemoteAddress LocalSubnet -Profile Any | Out-Null
 }
 @{ok=((Is-FosaRule $tcpName 'TCP') -and (Is-FosaRule $udpName 'UDP'))} | ConvertTo-Json -Compress

@@ -38,7 +38,7 @@ def select_adapters(rows):
 
 def powershell(script, timeout=45):
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
                             capture_output=True, timeout=timeout, text=True, encoding="utf-8", errors="replace")
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "Windows n’a pas terminé le diagnostic réseau.")
@@ -91,7 +91,7 @@ def configure_firewall(port, addresses):
         command = invoke
         encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
         powershell(f"$ErrorActionPreference='Stop'; Start-Process powershell.exe -Verb RunAs -Wait "
-                   f"-ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','{encoded}')", timeout=55)
+                   f"-ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}')", timeout=55)
         checked = json.loads(powershell(invoke + " -CheckOnly"))
         if not checked.get("ok"):
             raise RuntimeError("Les règles FOSA n’ont pas pu être vérifiées.")
