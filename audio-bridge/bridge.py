@@ -48,7 +48,7 @@ def _json_dumps(data):
     return json.dumps(data, default=_json_default)
 
 def json_response(data, **kwargs):
-    return json_response(data, dumps=_json_dumps, **kwargs)
+    return web.json_response(data, dumps=_json_dumps, **kwargs)
 
 class StereoTrack(MediaStreamTrack):
     kind = "audio"
