@@ -34,6 +34,7 @@ async function newMusician(browser,url,name,device={}){
  await page.locator('#profileName').fill(name);
  const start=Date.now();await page.locator('#joinListen').click();
  await page.waitForFunction(()=>document.querySelector('#streamStatus').textContent==='AUDIO EN LECTURE',null,{timeout:25000});
+ await page.waitForFunction(()=>{const a=window.testOutput;if(!a)return false;const samples=new Float32Array(a.fftSize);a.getFloatTimeDomainData(samples);return samples.some(x=>Math.abs(x)>.001)},null,{timeout:10000});
  assert.ok(Date.now()-start<30000,'Listen must connect within 30 seconds in this fixture');
  assert.equal(await page.locator('#liveTalk').isDisabled(),true,'HTTP talkback must be explicit and disabled');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'No horizontal overflow');

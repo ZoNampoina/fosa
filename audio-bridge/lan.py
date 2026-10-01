@@ -36,7 +36,7 @@ def select_adapters(rows):
         candidates.append(row)
     return sorted(candidates, key=lambda r: (not bool(r.get("gateway")), r.get("metric", 999), r["name"], r["address"]))
 
-def powershell(script, timeout=15):
+def powershell(script, timeout=45):
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
                             capture_output=True, timeout=timeout, text=True, encoding="utf-8", errors="replace")
@@ -49,13 +49,17 @@ def discover():
         rows = json.loads(powershell(r"""
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $ErrorActionPreference='Stop'
-        $rows=@(Get-NetIPConfiguration | ForEach-Object {
-          $c=$_; $a=Get-NetAdapter -InterfaceIndex $c.InterfaceIndex
-          foreach($ip in $c.IPv4Address){
+        $adapters=@(Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' })
+        $ips=@(Get-NetIPAddress -AddressFamily IPv4)
+        $routes=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
+        $interfaces=@(Get-NetIPInterface -AddressFamily IPv4)
+        $rows=@(foreach($a in $adapters){
+          $index=$a.InterfaceIndex
+          foreach($ip in @($ips | Where-Object { $_.InterfaceIndex -eq $index })){
             [pscustomobject]@{ name=$a.Name; description=$a.InterfaceDescription;
               address=$ip.IPAddress; prefix=$ip.PrefixLength;
-              gateway=($c.IPv4DefaultGateway.NextHop | Select-Object -First 1);
-              metric=[int](Get-NetIPInterface -InterfaceIndex $c.InterfaceIndex -AddressFamily IPv4).InterfaceMetric;
+              gateway=($routes | Where-Object { $_.InterfaceIndex -eq $index } | Select-Object -First 1 -ExpandProperty NextHop);
+              metric=[int]($interfaces | Where-Object { $_.InterfaceIndex -eq $index } | Select-Object -First 1 -ExpandProperty InterfaceMetric);
               physical=[bool]$a.HardwareInterface; up=($a.Status -eq 'Up');
               type=if($a.NdisPhysicalMedium -eq 9 -or $a.NdisPhysicalMedium -eq 1){'Wi-Fi'}else{'Ethernet'} }
           }

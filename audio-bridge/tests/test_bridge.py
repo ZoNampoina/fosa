@@ -86,6 +86,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/join',json={'code':invite['code'][0],'session':'stale-session'})
         self.assertEqual(r.status,409)
         self.assertEqual(len(self.bridge.saved['profiles']),count)
+        self.bridge.network['adapters']=[{'address':'192.168.1.12'}]
+        self.assertFalse(self.bridge.remote_device(SimpleNamespace(remote='127.0.0.1')))
+        self.assertFalse(self.bridge.remote_device(SimpleNamespace(remote='192.168.1.12')))
+        self.assertTrue(self.bridge.remote_device(SimpleNamespace(remote='192.168.1.44')))
 
     async def test_mr18_non_asio_refused_and_explicit_channel_selectors(self):
         fake=SimpleNamespace(

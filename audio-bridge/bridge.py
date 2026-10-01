@@ -240,8 +240,12 @@ class Bridge:
                                   clipping=bool(connected and time.monotonic()-self.clip_at[i] < 2))
                              for i, c in enumerate(self.saved["channels"])]}
 
+    def remote_device(self, req):
+        return bool(req.remote and not ipaddress.ip_address(req.remote).is_loopback and
+                    req.remote not in [a["address"] for a in self.network["adapters"]])
+
     async def health(self, req):
-        if req.remote and not ipaddress.ip_address(req.remote).is_loopback:
+        if self.remote_device(req):
             self.last_mobile = {"address": req.remote, "seenAt": time.time(), "stage": "Page accessible"}
         return json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION, "runId": self.run_id})
 
@@ -290,7 +294,7 @@ class Bridge:
              "mixVersion": 0, "allowed": [True]*CHANNELS, "locked": False, "talkAllowed": False, "talkListen": True}
         self.saved["profiles"][pid] = p
         self.persist()
-        if req.remote and not ipaddress.ip_address(req.remote).is_loopback:
+        if self.remote_device(req):
             self.last_mobile = {"address": req.remote, "seenAt": time.time(), "stage": "Profil rejoint"}
         return json_response({"token": p["token"], "profile": self.public_profile(p), "session": self.saved["session"]})
 
@@ -638,6 +642,7 @@ if __name__ == '__main__':
     if args.musicians:
         args.host = '0.0.0.0'
         args.insecure_lan = True
+        print('FOSA · recherche du réseau Wi-Fi/Ethernet du PC…', flush=True)
         try:
             adapters = discover()
         except Exception as e:
