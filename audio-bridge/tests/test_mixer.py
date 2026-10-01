@@ -6,6 +6,22 @@ import numpy as np
 from mixer import clean_mix, default_mix, gains, render_mix
 
 class MixerTests(unittest.TestCase):
+    def test_all_eighteen_inputs_are_independent(self):
+        for i in range(18):
+            with self.subTest(input=i+1):
+                samples=np.zeros((960,18),np.float32)
+                samples[:,i]=.25
+                mix=default_mix()
+                mix['master']=1
+                for c in mix['channels']:c['gain']=0
+                mix['channels'][i].update(gain=1,pan=-1)
+                output,_,_=render_mix(samples,mix)
+                self.assertTrue(np.allclose(output[:,0],.25))
+                self.assertFalse(output[:,1].any())
+                mix['channels'][i]['gain']=0
+                mix['channels'][(i+1)%18]['gain']=1
+                self.assertFalse(render_mix(samples,mix)[0].any())
+
     def test_isolated_gain_pan_and_assignment(self):
         m = default_mix()
         m['master'] = 1

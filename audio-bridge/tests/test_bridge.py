@@ -7,6 +7,8 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
+from urllib.parse import urlsplit, parse_qs
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -59,6 +61,68 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         r=await self.client.post('/api/mix',headers=self.auth,json={'mix':mix})
         self.assertEqual(r.status,403)
+
+    async def test_qr_invite_authentication_and_local_console(self):
+        r=await self.client.post('/api/local-console', headers={'X-FOSA-Console':'1'})
+        self.assertEqual(r.status,200)
+        self.assertEqual((await r.json())['token'],self.bridge.saved['admin'])
+        r=await self.client.post('/api/local-console', headers={'X-FOSA-Console':'1','Host':'attacker.example'})
+        self.assertEqual(r.status,403)
+        r=await self.client.post('/api/local-console', headers={'X-FOSA-Console':'1','Origin':'https://evil.example'})
+        self.assertEqual(r.status,403)
+        r=await self.client.post('/api/local-console')
+        self.assertEqual(r.status,403)
+        r=await self.client.get('/api/network',headers=self.auth)
+        self.assertEqual(r.status,401)
+        r=await self.client.get('/api/network',headers=self.admin)
+        network=await r.json()
+        invite=parse_qs(urlsplit(network['joinUrl']).fragment)
+        self.assertEqual(invite['code'],[self.bridge.saved['joinCode']])
+        self.assertNotIn(self.bridge.saved['admin'],network['joinUrl'])
+        r=await self.client.get('/api/qr',headers=self.admin)
+        self.assertEqual(r.status,200)
+        self.assertIn('<svg',await r.text())
+        count=len(self.bridge.saved['profiles'])
+        r=await self.client.post('/api/join',json={'code':invite['code'][0],'session':'stale-session'})
+        self.assertEqual(r.status,409)
+        self.assertEqual(len(self.bridge.saved['profiles']),count)
+
+    async def test_mr18_non_asio_refused_and_explicit_channel_selectors(self):
+        fake=SimpleNamespace(
+            query_hostapis=lambda:[{'name':'Windows MME'},{'name':'ASIO'}],
+            query_devices=lambda:[{'name':'MR18','index':0,'hostapi':0,'max_input_channels':18,'default_samplerate':48000},
+                                  {'name':'MIDAS USB Audio','index':1,'hostapi':1,'max_input_channels':18,'default_samplerate':48000}])
+        opened=[]
+        stream=SimpleNamespace(active=True,channels=18,samplerate=48000,blocksize=256,latency=.005,
+                               start=lambda:None,close=lambda:None)
+        fake.AsioSettings=lambda **kw: kw
+        fake.check_input_settings=lambda **kw:opened.append(kw)
+        fake.InputStream=lambda **kw:(opened.append(kw) or stream)
+        with patch('bridge.sd',fake),patch('bridge.WINDOWS',True):
+            self.assertFalse(self.bridge.devices()[0]['usable'])
+            self.assertTrue(self.bridge.devices()[1]['midasUsb'])
+            with self.assertRaisesRegex(ValueError,'ASIO requis'):
+                self.bridge.open_device(0,256)
+            self.bridge.open_device(1,256)
+            self.bridge.last_capture=time.monotonic()
+            self.assertTrue(self.bridge.connected())
+            self.assertEqual(opened[-1]['extra_settings']['channel_selectors'],list(range(18)))
+            self.assertEqual(opened[-1]['samplerate'],48000)
+            stream.samplerate=44100
+            self.assertFalse(self.bridge.connected())
+        self.bridge.stream=None
+
+    async def test_capture_channel_three_stays_independent_in_meters(self):
+        self.bridge.connected=lambda:True
+        data=np.zeros((960,18),np.float32)
+        data[:,2]=.25
+        self.bridge.capture(data,960,None,None)
+        await asyncio.sleep(.015)
+        r=await self.client.get('/api/meters',headers=self.auth)
+        m=await r.json()
+        self.assertEqual([i+1 for i,c in enumerate(m['channels']) if c['signal']],[3])
+        self.assertAlmostEqual(m['channels'][2]['rmsDb'],-12,delta=.2)
+        self.assertAlmostEqual(m['channels'][2]['peakDb'],-12,delta=.2)
 
     async def test_webrtc_stereo_transport_with_test_input(self):
         # Limit this transport test to localhost, independent of LAN adapter permissions.

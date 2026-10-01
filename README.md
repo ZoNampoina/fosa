@@ -62,3 +62,10 @@ Le Bluetooth appareil-à-appareil n'est pas disponible comme transport audio dir
 Nouveau module intégré : AUDIO, MON MIX, LIVE AUDIO, MATRIX, APPAREILS et DIAGNOSTIC. Capture native 18 entrées, mixage par profil et WebRTC LAN via un bridge local. L’application signale explicitement les sources absentes et les mesures indisponibles.
 
 **Installer le bridge sur le PC USB de la MR18 : [guide Windows / LAN](audio-bridge/README.md).** Essais MR18, téléphones et latence physique requis avant usage live critique. Le talkback FOSA existant est conservé. Cette version ne met pas à jour l’APK Android.
+
+
+## v0.9.4 — connexion LAN pour musiciens
+
+Lancement `audio-bridge/start-mobile-windows.cmd` : détection du réseau physique, vérification du port et du pare-feu Windows, puis console locale avec QR et code session. Le musicien scanne, saisit son nom et touche ÉCOUTER ; le monitoring HTTP ne demande ni micro ni certificat. La capture Windows exige ASIO et 18 entrées à 48 kHz. La réception des paquets et la lecture navigateur sont distinguées de la connexion du driver.
+
+[Guide de démarrage](audio-bridge/README.md) · [Audit et validation](audio-bridge/AUDIT.md). Le test MR18/Windows et les essais sur téléphones physiques restent indispensables ; le talkback mobile sécurisé et un installateur Windows autonome sont des étapes suivantes.

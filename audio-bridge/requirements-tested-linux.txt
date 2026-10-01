@@ -3,7 +3,7 @@ aioice==0.10.2
 aiortc==1.15.0
 av==17.1.0
 cffi==2.1.1
-cryptography==50.0.1
+cryptography==50.0.2
 numpy==2.3.5
 psutil==7.2.2
 pylibsrtp==1.0.0

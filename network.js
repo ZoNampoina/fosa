@@ -4,6 +4,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const get = (k,d) => {try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+const getText=k=>{try{return localStorage.getItem(k)||''}catch{return ''}};
 const put = (k,v) => {try{localStorage.setItem(k,JSON.stringify(v))}catch{notice('Stockage local indisponible. Garde la session ouverte.')}};
 const blank = () => ({master:.5,muteAll:false,ducking:-6,channels:Array.from({length:18},()=>({gain:.5,pan:0,mute:false,solo:false}))});
 const normalize = value => {
@@ -18,6 +19,11 @@ let desired=false,connecting=false,connectingGeneration=0,reconnectAt=0,retry=0,
 let localRevision=0, confirmedMixVersion=0;
 let telemetry={rtt:null,jitter:null,loss:null,buffer:null},previousStats=null,wake=null,externalTalk=false,qrObjectUrl=null;
 const audio=$('#monitorAudio'), query=new URLSearchParams(location.search);
+const invite=new URLSearchParams(location.hash.slice(1));
+const inviteValue=k=>invite.get(k)||query.get(k);
+let outputContext=null,outputSource=null,outputGain=null,playbackReady=false,receivedPackets=0,lastPacketsAt=0;
+let serverNetwork=null,setupQrUrl=null,joining=false;
+const musician=query.has('musician');
 const embedded=window.parent!==window;
 const notice=t=>$('#notice').textContent=t;
 function contextKey(){return 'fosa_network_mix:'+server+':'+(profile?.id||'draft')}
@@ -29,8 +35,9 @@ function setServer(value){
 async function api(path,{body,auth=true,timeout=6000}={}){
  if(!server)throw Error('Renseigne l’adresse du PC serveur.');
  const headers={};if(auth)headers.Authorization='Bearer '+token();if(body!==undefined)headers['Content-Type']='application/json';
- const r=await fetch(server+'/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(timeout)});
- const j=await r.json().catch(()=>({error:'Réponse du serveur illisible'}));if(!r.ok)throw Error(j.error||'Erreur serveur '+r.status);return j;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
+ try{const r=await fetch(server+'/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:controller.signal});
+ const j=await r.json().catch(()=>({error:'Réponse du serveur illisible'}));if(!r.ok)throw Error(j.error||'Erreur serveur '+r.status);return j;}finally{clearTimeout(timer)}
 }
 function show(view){
  if(!$$('[data-panel]').some(x=>x.dataset.panel===view))view='audio';page=view;
@@ -42,19 +49,25 @@ const fmt=(v,suffix=' ms')=>Number.isFinite(v)?v.toFixed(1)+suffix:'—';
 function quality(){if(!pc||pc.connectionState!=='connected'||telemetry.jitter===null)return'EN ATTENTE';if(telemetry.loss>5||telemetry.jitter>30||telemetry.rtt>150)return'CRITIQUE';if(telemetry.loss>1||telemetry.jitter>15||telemetry.rtt>70)return'INSTABLE';return telemetry.jitter<5&&telemetry.loss===0&&telemetry.rtt!==null&&telemetry.rtt<20?'EXCELLENT':'BON'}
 function paintStatus(){
  if(embedded)window.parent.postMessage({type:'fosa-network-state',active:desired},location.origin);const reachable=!!state;$('#bridgeStatus').textContent=reachable?(state.connected?'MR18 / INTERFACE CONNECTÉE':'BRIDGE CONNECTÉ · ENTRÉES ABSENTES'):'NON CONNECTÉ';$('#bridgeStatus').classList.toggle('online',!!state?.connected);
- $('#streamStatus').textContent=pc?.connectionState==='connected'?(state?.connected?'AUDIO CONNECTÉ':'AUDIO CONNECTÉ · SOURCE ABSENTE'):desired?'RECONNEXION…':'AUDIO ARRÊTÉ';
+ const incoming=receivedPackets>0&&Date.now()-lastPacketsAt<3500;
+ $('#streamStatus').textContent=pc?.connectionState==='connected'?(state?.connected?(playbackReady&&incoming?'AUDIO EN LECTURE':!playbackReady?'TOUCHE ÉCOUTER POUR LA LECTURE':'LIAISON PRÊTE · ATTENTE AUDIO'):'LIAISON PRÊTE · SOURCE ABSENTE'):connecting?'CONNEXION AUDIO…':desired?'RECONNEXION…':'AUDIO ARRÊTÉ';
  $('#netType').textContent=networkType();$('#liveQuality').textContent=quality();$('#liveQuality').style.color=['CRITIQUE','INSTABLE'].includes(quality())?'var(--amber)':'';
  $('#liveLatency').textContent='Latence audio : non mesurée · RTT '+fmt(telemetry.rtt);
  $('#captureSummary').textContent=state?.connected?`${state.device?.name} · ${state.device?.driver} · ${state.sampleRate} Hz · ${state.buffer} échantillons · ${state.inputs} entrées`:(state?.error||'NON CONNECTÉ · aucune entrée détectée');
  $('#scanInterfaces').disabled=!admin;$('#startCapture').disabled=!admin;$('#interfaceSelect').disabled=!admin;
  $$('#master,#liveMaster,#muteAll,#liveMute,#ducking,#applyPreset,#restoreMix,#resetMix').forEach(el=>el.disabled=profile?.locked===true);$('#mixScope').textContent=profile?`${profile.name} · ${profile.role}${profile.locked?' · VERROUILLÉ':''}`:'Réglages locaux';
  $('#liveTalkNote').textContent=profile?.talkAllowed?'Micro LAN '+(micEnabled?'actif':'à activer dans TALKBACK'):'Autorisation talkback requise dans MATRIX.';
- $('#enableMic').textContent=micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO';
+ const micAvailable=!!navigator.mediaDevices?.getUserMedia;
+ $('#enableMic').textContent=micAvailable?(micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO'):'MICRO · HTTPS REQUIS';
+ $('#enableMic').disabled=!micAvailable;$$('.talk').forEach(b=>b.disabled=!micAvailable||!profile?.talkAllowed);
+ if(!micAvailable)$('#liveTalkNote').textContent='Écoute seule sur ce lien. Le micro talkback exige une connexion sécurisée.';
  $('#mixNotice').textContent=changed?'Modifications locales en attente du serveur.':profile?'Mix enregistré sur cet appareil et sur le serveur LAN.':'Réglages locaux : rejoins le serveur pour les appliquer au son.';
 }
 function buildMixer(){
  $('#mixer').innerHTML=Array.from({length:18},(_,i)=>`<article class="channel" data-channel="${i}"><span class="num">${String(i+1).padStart(2,'0')}</span><strong data-channel-name>CH ${String(i+1).padStart(2,'0')}</strong><output data-volume>50 %</output><div class="fader"><button data-step="-5" data-i="${i}" aria-label="Diminuer canal ${i+1}">−</button><input data-gain="${i}" type="range" min="0" max="100" value="50" aria-label="Volume canal ${i+1}"><button data-step="5" data-i="${i}" aria-label="Augmenter canal ${i+1}">+</button></div><div class="ch-actions"><button data-mute="${i}" aria-label="Mute canal ${i+1}" aria-pressed="false">M</button><button data-solo="${i}" aria-label="Solo temporaire canal ${i+1}" aria-pressed="false">S</button><label class="pan">PAN<input data-pan="${i}" type="range" min="-100" max="100" value="0" aria-label="Panoramique canal ${i+1}"></label></div><div class="meter"><i></i></div><span class="reading">NON CONNECTÉ</span></article>`).join('');
  $('#channelNames').innerHTML=Array.from({length:18},(_,i)=>`<div class="channel-name"><span>CH ${String(i+1).padStart(2,'0')}</span><input data-name="${i}" value="CH ${String(i+1).padStart(2,'0')}" maxlength="60" aria-label="Nom canal ${i+1}" disabled><input data-role="${i}" placeholder="Type : basse, chant…" maxlength="60" aria-label="Type canal ${i+1}" disabled><button data-rename="${i}" disabled>OK</button></div>`).join('');
+ $$('.meter').forEach(m=>m.insertAdjacentHTML('beforeend','<b aria-hidden="true"></b>'));
+ $('#physicalInput').innerHTML=Array.from({length:18},(_,i)=>`<option value="${i+1}">Entrée ${i+1}</option>`).join('');
 }
 function syncMix(){
  $('#master').value=$('#liveMaster').value=Math.round(mix.master*100);$('#masterValue').value=$('#liveMasterValue').value=Math.round(mix.master*100)+' %';$('#ducking').value=mix.ducking;
@@ -65,6 +78,7 @@ function updateMeters(){
  $$('.channel').forEach((el,i)=>{const c=state?.channels?.[i],name=c?.name||`CH ${String(i+1).padStart(2,'0')}`;el.querySelector('[data-channel-name]').textContent=name;el.classList.toggle('clipping',!!c?.clipping);el.querySelector('.meter i').style.width=(c?.active?Math.max(0,Math.min(100,(c.rmsDb+60)/60*100)):0)+'%';el.querySelector('.reading').textContent=!c?.active?'NON CONNECTÉ':c.clipping?'CLIPPING':`${c.signal?'Signal':'Silence'} · ${fmt(c.rmsDb,' dBFS')} · peak ${fmt(c.peakDb,' dBFS')}`;
  const n=$(`[data-name="${i}"]`),r=$(`[data-role="${i}"]`);if(document.activeElement!==n)n.value=name;if(document.activeElement!==r)r.value=c?.role||'';n.disabled=r.disabled=$(`[data-rename="${i}"]`).disabled=!admin;
  });
+ $$('.channel').forEach((el,i)=>{const c=state?.channels?.[i];el.querySelector('.meter b').style.left=(c?.active?Math.max(0,Math.min(99,(c.peakDb+60)/60*100)):0)+'%'});
 }
 let persistTimer;
 function edit(){localRevision++;changed=true;syncMix();const durable=normalize(mix);put(contextKey(),durable);if(!profile)put('fosa_network_draft',durable);clearTimeout(persistTimer);persistTimer=setTimeout(flush,120);paintStatus()}
@@ -73,7 +87,7 @@ async function flush(){
  try{const ack=await api('mix',{body:{mix}});confirmedMixVersion=ack.mixVersion||0;if(JSON.stringify(mix)===sent)changed=false}catch(e){notice(e.message)}finally{sending=false;paintStatus();if(changed&&JSON.stringify(mix)!==sent)flush()}
 }
 async function pollMeters(){
- if(!token()||!state||meterPolling||document.hidden||!['mix','live'].includes(page))return;
+ if(!token()||!state||meterPolling||document.hidden||!['mix','live','diagnostic'].includes(page))return;
  meterPolling=true;
  try{
   const m=await api('meters',{timeout:1500});
@@ -81,7 +95,7 @@ async function pollMeters(){
   if(Array.isArray(m.channels)&&Array.isArray(state.channels)){
    state.channels=state.channels.map((c,i)=>Object.assign({},c,m.channels[i]||{}));
   }
-  paintStatus();updateMeters();
+  paintStatus();updateMeters();if(page==='diagnostic')renderMapping();
  }catch{}
  finally{meterPolling=false}
 }
@@ -91,34 +105,52 @@ async function refresh(){
   if(profile){if(!dirtyAtStart&&!changed&&!sending&&revision===localRevision&&(profile.mixVersion||0)>=confirmedMixVersion&&JSON.stringify(profile.mix)!==JSON.stringify(mix)){mix=profile.mix;syncMix()}if(changed&&!profile.locked)await flush()}
   paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(page==='devices')renderDevices();
   if(profile?.locked){mix=profile.mix;changed=false;syncMix()}if(page==='matrix'&&document.activeElement?.closest('#matrix')==null)renderMatrix();if(page==='talkback')renderTalkTargets();
+  if(admin)await updateSetup();
  }catch(e){state=null;paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(desired)notice('Serveur momentanément inaccessible. Le dernier mix est conservé.');}
  finally{polling=false}
 }
 async function detect(){
  try{setServer($('#serverUrl').value.trim()||server||'http://127.0.0.1:8765');const h=await api('health',{auth:false,timeout:2500});if(h.service!=='fosa-audio-bridge'||h.protocol!==1)throw Error('Ce serveur n’est pas un bridge FOSA compatible.');$('#detectInfo').textContent='Bridge détecté · '+h.version;notice('Bridge trouvé. Rejoins avec le code affiché sur le PC.');await refresh()}
- catch(e){$('#detectInfo').textContent='NON CONNECTÉ';notice('Bridge introuvable. Vérifie le lancement sur le PC, l’adresse et le certificat HTTPS. '+e.message)}
+ catch(e){$('#detectInfo').textContent='NON CONNECTÉ';notice('PC serveur inaccessible. Vérifie que FOSA reste lancé et que les appareils utilisent le même réseau Wi-Fi. Un Wi-Fi invité, l’isolation des clients ou un VPN peut bloquer l’accès. '+e.message)}
 }
-async function join(){
- try{setServer($('#serverUrl').value.trim()||server);admin='';const expected=query.get('session');const b=await api('join',{auth:false,body:{code:$('#joinCode').value.trim().toUpperCase(),name:$('#profileName').value.trim()||'Musicien',role:$('#profileRole').value}});if(expected&&b.session!==expected)throw Error('Ce serveur ne correspond pas à la session du lien.');credentials[server]={token:b.token,id:b.profile.id};put('fosa_network_credentials',credentials);profile=b.profile;mix=normalize(get(contextKey(),mix));changed=true;await refresh();syncMix();show('mix');notice('Profil connecté. Appuie sur ÉCOUTER pour lancer le son.')}
- catch(e){notice(e.message)}
+async function join(listen=false){
+ if(joining)return;joining=true;if(listen)unlockOutput();$('#joinListen').disabled=true;
+ try{setServer($('#serverUrl').value.trim()||server);admin='';const b=await api('join',{auth:false,body:{code:$('#joinCode').value.trim().toUpperCase(),session:inviteValue('session'),name:$('#profileName').value.trim()||'Musicien',role:$('#profileRole').value}});credentials[server]={token:b.token,id:b.profile.id};put('fosa_network_credentials',credentials);profile=b.profile;mix=normalize(b.profile.mix);changed=false;await refresh();syncMix();show('live');if(invite.has('code'))history.replaceState(null,'',location.pathname+location.search);notice('Profil rejoint.');if(listen)await startAudio()}
+ catch(e){notice('Connexion impossible : '+e.message)}finally{joining=false;$('#joinListen').disabled=false}
 }
 async function adminLogin(){try{setServer($('#serverUrl').value.trim()||server);admin=$('#adminKey').value.trim();const s=await api('state');if(!s.admin)throw Error('Clé régisseur incorrecte');stopAudio();state=s;profile=null;$('#adminKey').value='';paintStatus();await scanInterfaces();notice('Console régisseur ouverte. Les permissions sont vérifiées par le bridge.')}catch(e){admin='';notice(e.message)}}
 async function scanInterfaces(){try{const b=await api('devices');$('#interfaceSelect').innerHTML=b.devices.length?b.devices.map(d=>`<option value="${d.id}" ${d.inputs<18||d.usable===false?'disabled':''}>${esc(d.name)} · ${esc(d.driver)} · ${d.inputs} IN${d.usable===false?' · ASIO REQUIS':''}</option>`).join(''):'<option>Aucune interface audio détectée</option>';const preferred=b.devices.find(d=>d.usable!==false&&d.mr18&&d.asio)||b.devices.find(d=>d.usable!==false&&d.mr18)||b.devices.find(d=>d.usable!==false&&d.inputs>=18);if(preferred)$('#interfaceSelect').value=preferred.id;else if(b.devices.some(d=>d.mr18&&d.usable===false))notice('MR18 détectée uniquement via MME/WDM. Installe ou active le pilote ASIO Midas pour accéder aux 18 canaux séparés.');}catch(e){notice(e.message)}}
 async function waitIce(connection){if(connection.iceGatheringState==='complete')return;await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{connection.removeEventListener('icegatheringstatechange',done);reject(Error('Délai de collecte réseau dépassé'))},8000);function done(){if(connection.iceGatheringState==='complete'){clearTimeout(timer);connection.removeEventListener('icegatheringstatechange',done);resolve()}}connection.addEventListener('icegatheringstatechange',done)})}
 function tuneStereo(sdp){return sdp.replace(/a=fmtp:(\d+) ([^\r\n]+)/g,(line,pt,params)=>new RegExp('a=rtpmap:'+pt+' opus/','i').test(sdp)?`a=fmtp:${pt} ${params};stereo=1;sprop-stereo=1;maxaveragebitrate=128000`:line)}
 async function startAudio(){
- if(connecting)return;if(!profile||admin){notice('Rejoins le bridge avec un profil musicien.');show('audio');return}if(pc?.connectionState==='connected'){await audio.play().catch(()=>notice('Appuie à nouveau sur ÉCOUTER.'));return}
+ unlockOutput();if(connecting)return;if(!profile||admin){notice('Rejoins le bridge avec un profil musicien.');show('audio');return}if(pc?.connectionState==='connected'){return}
+ if(typeof RTCPeerConnection!=='function'){notice('WebRTC absent de ce navigateur. Ouvre ce lien dans Chrome sur Android ou Safari sur iPhone.');return}
  desired=true;put('fosa_network_resume:'+server,true);connecting=true;const generation=++connectingGeneration;
- try{pc?.close();previousStats=null;const next=new RTCPeerConnection({iceServers:[]});pc=next;transceiver=next.addTransceiver('audio',{direction:'sendrecv'});if(micEnabled&&mic)await transceiver.sender.replaceTrack(mic.getAudioTracks()[0]);
+ let next;
+ try{pc?.close();previousStats=null;receivedPackets=0;lastPacketsAt=0;next=new RTCPeerConnection({iceServers:[]});pc=next;transceiver=next.addTransceiver('audio',{direction:navigator.mediaDevices?.getUserMedia?'sendrecv':'recvonly'});if(micEnabled&&mic)await transceiver.sender.replaceTrack(mic.getAudioTracks()[0]);
  const opus=RTCRtpReceiver.getCapabilities?.('audio')?.codecs.filter(c=>c.mimeType.toLowerCase()==='audio/opus');if(opus?.length)transceiver.setCodecPreferences(opus);
- next.ontrack=e=>{if(pc!==next)return;audio.srcObject=e.streams[0]||new MediaStream([e.track]);applyJitter();audio.play().catch(()=>notice('Audio prêt : touche ÉCOUTER pour autoriser la lecture.'));};
- next.onconnectionstatechange=()=>{if(pc!==next)return;paintStatus();if(next.connectionState==='connected'){retry=0;notice(state?.connected?'Écoute connectée.':'Liaison prête, en attente de la MR18.')}if(['failed','disconnected'].includes(next.connectionState)){reconnectAt=Date.now()+Math.min(8000,1000*2**Math.min(retry++,3))}};
+ next.ontrack=e=>{if(pc!==next)return;attachOutput(e.streams[0]||new MediaStream([e.track]));applyJitter();};
+ next.onconnectionstatechange=()=>{if(pc!==next)return;paintStatus();if(next.connectionState==='connected'){retry=0;notice(state?.connected?'Liaison établie. Réception du mix…':'Liaison prête, en attente de la MR18.')}if(['failed','disconnected'].includes(next.connectionState)){reconnectAt=Date.now()+Math.min(8000,1000*2**Math.min(retry++,3));notice('Audio interrompu. Reconnexion automatique ; si cela persiste, vérifie le Wi-Fi et le diagnostic du PC.')}};
  const offer=await next.createOffer();offer.sdp=tuneStereo(offer.sdp);await next.setLocalDescription(offer);await waitIce(next);
+ if(generation!==connectingGeneration||!desired){next.close();return}
  const answer=await api('offer',{body:{type:'offer',sdp:next.localDescription.sdp,device:navigator.userAgent.slice(0,100)},timeout:15000});
  if(generation!==connectingGeneration||!desired){next.close();return}await next.setRemoteDescription(answer);setupMediaSession();
- }catch(e){notice('Audio non connecté : '+e.message);pc?.close();pc=null;reconnectAt=Date.now()+4000}finally{connecting=false;paintStatus()}
+ }catch(e){if(generation===connectingGeneration){notice('Audio non connecté : '+e.message+'. Si la page est accessible mais pas le son, le trafic UDP WebRTC peut être bloqué.');next?.close();pc=null;reconnectAt=Date.now()+4000}}finally{if(generation===connectingGeneration)connecting=false;paintStatus()}
 }
-function stopAudio(){desired=false;connectingGeneration++;put('fosa_network_resume:'+server,false);stopTalk();pc?.close();pc=null;audio.srcObject=null;telemetry={rtt:null,jitter:null,loss:null,buffer:null};mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;api('disconnect',{body:{}}).catch(()=>{});paintStatus()}
+function stopAudio(){desired=false;connectingGeneration++;connecting=false;put('fosa_network_resume:'+server,false);stopTalk();pc?.close();pc=null;transceiver=null;outputSource?.disconnect();outputSource=null;audio.srcObject=null;receivedPackets=0;playbackReady=false;telemetry={rtt:null,jitter:null,loss:null,buffer:null};mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;if(token())api('disconnect',{body:{}}).catch(()=>{});paintStatus()}
+// Resume Web Audio in the user's original gesture, before joining/ICE/network awaits.
+// This receive-only path never opens a microphone and works on an HTTP LAN origin.
+function unlockOutput(){
+ try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;
+  if(!outputContext){outputContext=new C({latencyHint:'interactive'});outputGain=outputContext.createGain();outputGain.connect(outputContext.destination);outputContext.onstatechange=()=>{playbackReady=outputContext.state==='running';paintStatus()}}
+  outputContext.resume().then(()=>{playbackReady=outputContext.state==='running';paintStatus()}).catch(()=>notice('Touche ÉCOUTER pour autoriser la sortie audio.'));
+ }catch(e){notice('Sortie audio : '+e.message)}
+}
+function attachOutput(stream){
+ outputSource?.disconnect();audio.srcObject=stream;
+ if(outputContext){audio.muted=true;outputSource=outputContext.createMediaStreamSource(stream);outputSource.connect(outputGain);audio.play().catch(()=>{});playbackReady=outputContext.state==='running'}
+ else{audio.muted=false;audio.play().then(()=>{playbackReady=true;paintStatus()}).catch(()=>notice('Audio reçu : touche ÉCOUTER pour autoriser la lecture.'))}
+}
 function applyJitter(){for(const r of pc?.getReceivers()||[])if('jitterBufferTarget'in r)try{r.jitterBufferTarget=Number($('#jitterTarget').value)}catch{}}
 async function enableMic(){
  if(micEnabled){stopTalk();mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;await transceiver?.sender.replaceTrack(null);paintStatus();return}
@@ -127,10 +159,60 @@ async function enableMic(){
 }
 function startTalk(e){if(!micEnabled||!profile?.talkAllowed){notice('Active d’abord le micro autorisé dans TALKBACK.');return}e?.preventDefault();e?.currentTarget?.setPointerCapture?.(e.pointerId);talking=true;mic?.getTracks().forEach(t=>t.enabled=true);$$('.talk').forEach(b=>b.classList.add('talking'));sendControl()}
 function stopTalk(){if(!talking)return;talking=false;mic?.getTracks().forEach(t=>t.enabled=false);$$('.talk').forEach(b=>b.classList.remove('talking'));sendControl()}
-function sendControl(){if(!desired||!profile||!state)return;api('control',{body:{talk:talking,target:$('#talkTarget').value,metrics:{...telemetry,network:networkType(),audioLatency:null}},timeout:2000}).catch(()=>{})}
-async function stats(){if(!pc||pc.connectionState!=='connected')return;try{const rows=await pc.getStats();let pair,rtp;rows.forEach(r=>{if(r.type==='transport'&&r.selectedCandidatePairId)pair=rows.get(r.selectedCandidatePairId);if(r.type==='inbound-rtp'&&r.kind==='audio')rtp=r});if(pair)telemetry.rtt=Number.isFinite(pair.currentRoundTripTime)?pair.currentRoundTripTime*1000:null;if(rtp){telemetry.jitter=Number.isFinite(rtp.jitter)?rtp.jitter*1000:null;if(previousStats&&previousStats.id===rtp.id){const lost=Math.max(0,(rtp.packetsLost||0)-previousStats.lost),received=Math.max(0,(rtp.packetsReceived||0)-previousStats.received),n=(rtp.jitterBufferEmittedCount||0)-previousStats.emitted;telemetry.loss=lost+received>0?lost/(lost+received)*100:null;telemetry.buffer=n>0?((rtp.jitterBufferDelay||0)-previousStats.delay)/n*1000:null}previousStats={id:rtp.id,lost:rtp.packetsLost||0,received:rtp.packetsReceived||0,emitted:rtp.jitterBufferEmittedCount||0,delay:rtp.jitterBufferDelay||0}}paintStatus();if(page==='diagnostic')renderDiagnostic()}catch{}}
+function sendControl(){if(!desired||!profile||!state)return;api('control',{body:{talk:talking,target:$('#talkTarget').value,metrics:{...telemetry,network:networkType(),audioLatency:null,playback:playbackReady,packets:receivedPackets}},timeout:2000}).catch(()=>{})}
+async function stats(){if(!pc||pc.connectionState!=='connected')return;try{const rows=await pc.getStats();let pair,rtp;rows.forEach(r=>{if(r.type==='transport'&&r.selectedCandidatePairId)pair=rows.get(r.selectedCandidatePairId);if(r.type==='inbound-rtp'&&r.kind==='audio')rtp=r});if(pair)telemetry.rtt=Number.isFinite(pair.currentRoundTripTime)?pair.currentRoundTripTime*1000:null;if(rtp){if((rtp.packetsReceived||0)>receivedPackets)lastPacketsAt=Date.now();receivedPackets=rtp.packetsReceived||0;telemetry.jitter=Number.isFinite(rtp.jitter)?rtp.jitter*1000:null;if(previousStats&&previousStats.id===rtp.id){const lost=Math.max(0,(rtp.packetsLost||0)-previousStats.lost),received=Math.max(0,(rtp.packetsReceived||0)-previousStats.received),n=(rtp.jitterBufferEmittedCount||0)-previousStats.emitted;telemetry.loss=lost+received>0?lost/(lost+received)*100:null;telemetry.buffer=n>0?((rtp.jitterBufferDelay||0)-previousStats.delay)/n*1000:null}previousStats={id:rtp.id,lost:rtp.packetsLost||0,received:rtp.packetsReceived||0,emitted:rtp.jitterBufferEmittedCount||0,delay:rtp.jitterBufferDelay||0}}paintStatus();if(page==='diagnostic')renderDiagnostic()}catch{}}
 function renderDiagnostic(){
- const s=state,d=s?.device;const metrics=[['MR18 / interface',s?.connected?'Connectée':'NON CONNECTÉE'],['Driver',d?.driver||'—'],['Fréquence',s?.sampleRate?s.sampleRate+' Hz':'—'],['Buffer réel',s?.buffer?s.buffer+' éch.':'—'],['Entrées',s?.inputs??'—'],['Canaux avec signal',s?s.channels.filter(c=>c.signal).length:'—'],['CPU bridge',fmt(s?.cpu,' %')],['RAM bridge',fmt(s?.ramMB,' Mo')],['Réseau',networkType()],['RTT WebRTC',fmt(telemetry.rtt)],['Jitter',fmt(telemetry.jitter)],['Pertes / intervalle',fmt(telemetry.loss,' %')],['Buffer réception',fmt(telemetry.buffer)],['Latence driver',fmt(s?.captureLatencyMs)],['Paquet Opus',s?s.opusFrameMs+' ms':'—'],['XRUN / pertes capture',s?`${s.xruns} / ${s.captureDrops}`:'—'],['Qualité réseau',quality()],['Latence audio bout-en-bout','NON MESURÉE']];$('#diagnostics').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+ const s=state,d=s?.device;const metrics=[['MR18 / interface',s?.connected?'Connectée':'NON CONNECTÉE'],['Driver',d?.driver||'—'],['ASIO',d?.asio?'OUI':'NON / absent'],['Fréquence',s?.sampleRate?s.sampleRate+' Hz':'—'],['Buffer réel',s?.buffer?s.buffer+' éch.':'—'],['Entrées',s?.inputs??'—'],['Canaux avec signal',s?s.channels.filter(c=>c.signal).length:'—'],['CPU bridge',fmt(s?.cpu,' %')],['RAM bridge',fmt(s?.ramMB,' Mo')],['Réseau',networkType()],['RTT WebRTC',fmt(telemetry.rtt)],['Jitter',fmt(telemetry.jitter)],['Pertes / intervalle',fmt(telemetry.loss,' %')],['Buffer réception',fmt(telemetry.buffer)],['Latence driver',fmt(s?.captureLatencyMs)],['Paquet Opus',s?s.opusFrameMs+' ms':'—'],['XRUN / pertes capture',s?`${s.xruns} / ${s.captureDrops}`:'—'],['Qualité réseau',quality()],['Paquets audio reçus',receivedPackets],['Sortie navigateur',outputContext?.state|| (playbackReady?'Lecture active':'En attente')],['Latence audio bout-en-bout','NON MESURÉE']];$('#diagnostics').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');renderMapping();
+}
+function renderMapping(){
+ $('#inputMapping').innerHTML='<table><thead><tr><th>Sélecteur ASIO demandé</th><th>FOSA</th><th>RMS / peak dBFS</th></tr></thead><tbody>'+(state?.channels||[]).map((c,i)=>`<tr><td>Input ${i+1}</td><td>CH${i+1}</td><td>${fmt(c.rmsDb,'')} / ${fmt(c.peakDb,'')}</td></tr>`).join('')+'</tbody></table>';
+}
+async function testInput(){
+ if(!state?.connected){notice('Ouvre d’abord les 18 entrées ASIO.');return}
+ const expected=Number($('#physicalInput').value);$('#testInput').disabled=true;
+ $('#mappingResult').textContent=`Parle ou envoie un signal uniquement dans l’entrée physique ${expected}, pendant 4 secondes…`;
+ const peaks=Array(18).fill(-120);
+ try{for(let n=0;n<32;n++){const m=await api('meters',{timeout:1500});if(!m.connected)throw Error('Capture interrompue');m.channels.forEach((c,i)=>{peaks[i]=Math.max(peaks[i],c.rmsDb??-120)});await new Promise(r=>setTimeout(r,125))}
+  const order=peaks.map((db,i)=>({db,i})).sort((a,b)=>b.db-a.db),loud=order[0];
+  if(loud.db<-60)$('#mappingResult').textContent='Aucun signal assez fort détecté. Vérifie le gain et le routage USB MR18, puis recommence.';
+  else if(loud.db-order[1].db<10)$('#mappingResult').textContent='Plusieurs canaux reçoivent du signal. Isole cette entrée avant de conclure sur son mapping.';
+  else $('#mappingResult').textContent=`Entrée physique ${expected} → signal dominant sur CH${loud.i+1} (${loud.db.toFixed(1)} dBFS). `+(loud.i+1===expected?'Correspondance observée pendant ce test.':'Correspondance différente : vérifie le routage USB de la MR18.');
+ }catch(e){$('#mappingResult').textContent='Test interrompu : '+e.message}finally{$('#testInput').disabled=false}
+}
+async function sharedQr(box,role,address){
+ const path='qr?role='+encodeURIComponent(role)+(address?'&address='+encodeURIComponent(address):'');
+ const r=await fetch(server+'/api/'+path,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('QR indisponible');
+ const url=URL.createObjectURL(await r.blob());const old=box.dataset.objectUrl;if(old)URL.revokeObjectURL(old);box.dataset.objectUrl=url;
+ box.innerHTML='<img alt="QR pour rejoindre la session FOSA">';box.querySelector('img').src=url;
+}
+async function updateSetup(){
+ if(!admin)return;
+ serverNetwork=await api('network');$('#serverSetup').hidden=false;
+ const adapters=serverNetwork.adapters||[],select=$('#lanAdapter');
+ const previous=select.value;
+ if(JSON.stringify(adapters)!==select.dataset.adapters){select.innerHTML=adapters.map(a=>`<option value="${esc(a.address)}">${esc(a.type||'LAN')} · ${esc(a.name)} · ${esc(a.address)}</option>`).join('');select.dataset.adapters=JSON.stringify(adapters);if(adapters.some(a=>a.address===previous))select.value=previous}
+ $('#adapterLabel').hidden=adapters.length<2;
+ const link=new URL(serverNetwork.joinUrl);if(select.value)link.hostname=select.value;
+ $('#setupAddress').value=link.origin;$('#setupCode').textContent=serverNetwork.joinCode;
+ const qrKey=link.href;
+ if($('#setupQr').dataset.key!==qrKey){await sharedQr($('#setupQr'),'Personnalisé',select.value);$('#setupQr').dataset.key=qrKey}
+ const users=state?.users||[],connected=users.filter(p=>p.connected);
+ const checks=[
+  [!!state?.device,'Interface audio',state?.device?.name||state?.error||'En attente de la MR18'],
+  [!!state?.device?.asio,'ASIO',state?.device?.driver||'Aucun pilote ouvert'],
+  [state?.connected&&state?.inputs===18,'18 entrées à 48 kHz',state?.connected?`${state.inputs} entrées · ${state.sampleRate} Hz`:'Capture en attente'],
+  [adapters.length>0,'Réseau LAN',adapters.length?`${select.selectedOptions[0]?.textContent||adapters[0].address}`:'Mode local uniquement : utilise start-mobile-windows.cmd'],
+  [serverNetwork.selfCheck==='passed','Serveur HTTP sur le PC',serverNetwork.selfCheckNote||'Non vérifié par ce mode de lancement'],
+  [serverNetwork.firewall?.state==='configured','Pare-feu Windows',serverNetwork.firewall?.message||'Non vérifié'],
+  [!!$('#setupQr').dataset.key,'QR de connexion','Code session inclus · clé régisseur exclue'],
+  [!!serverNetwork.lastClient,'Accès depuis un autre appareil',serverNetwork.lastClient?serverNetwork.lastClient.stage+' · '+serverNetwork.lastClient.address:'En attente du premier scan'],
+  [connected.length>0,'Liaison audio',connected.length?connected.length+' profil(s) relié(s) par WebRTC':'En attente de ÉCOUTER sur le téléphone'],
+  [false,'Latence physique','Non mesurée · test dans DIAGNOSTIC']
+ ];
+ $('#setupChecks').innerHTML=checks.map(([ok,name,detail])=>`<li><b class="${ok?'check-ok':'check-wait'}">${ok?'✓':'…'} ${esc(name)}</b> · ${esc(detail)}</li>`).join('');
+ $('#setupReady').textContent=!state?.connected?'ENTRÉES À VÉRIFIER':connected.length?'MUSICIEN RELIÉ':'PRÊT À CONNECTER';
+ $('#networkHelp').textContent=serverNetwork.lastClient?'Le serveur a reçu une requête d’un autre appareil. Si le son manque, consulte DIAGNOSTIC : paquets reçus, lecture et source sont contrôlés séparément.':'Le contrôle HTTP depuis ce PC ne prouve pas l’accès depuis le téléphone. Si le QR ne s’ouvre pas : même Wi-Fi, réseau invité et isolation des appareils, VPN ou autorisation réseau local du navigateur sont à vérifier.';
+ $('#welcomeCard').hidden=true;
 }
 function renderTalkTargets(){const el=$('#talkTarget'),selected=el.value;const roles=['Batteur','Bassiste','Guitariste','Clavier','Chant','Chef','Régisseur'];if(el.options.length===1){for(const role of roles){const o=document.createElement('option');o.value='role:'+role;o.textContent=role;el.appendChild(o)}}el.value=selected}
 function renderDevices(){const users=state?.users;if(!users){$('#devices').textContent='Console régisseur requise.';return}$('#devices').innerHTML=users.length?`<table><thead><tr>${['Utilisateur','Appareil','Mix','Talkback','Connexion','RTT','Latence audio'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${users.map(p=>`<tr><td>${esc(p.name)}</td><td title="${esc(p.device)}">${/Android/i.test(p.device)?'Android':/iPhone|iPad/i.test(p.device)?'iOS':p.connected?'PC / navigateur':'—'}</td><td>${esc(p.role)}</td><td>${p.talkAllowed?'Micro autorisé':'Écoute'}${p.talkListen?'':' OFF'}</td><td>${p.connected?esc(p.network):'Hors ligne'}</td><td>${fmt(p.metrics?.rtt)}</td><td>Non mesurée</td></tr>`).join('')}</tbody></table>`:'Aucun profil musicien. Rejoins le bridge sur un autre appareil.'}
@@ -138,8 +220,8 @@ function renderMatrix(){const users=state?.users;if(!admin||!users){$('#matrix')
  $('#matrix').innerHTML=`<table><thead><tr><th>Entrée</th>${users.map(p=>`<th>${esc(p.name)}<br><label><input type="checkbox" data-permission="locked" data-user="${p.id}" ${p.locked?'checked':''}>Verrouiller</label><label><input type="checkbox" data-permission="talkAllowed" data-user="${p.id}" ${p.talkAllowed?'checked':''}>Micro</label><label><input type="checkbox" data-permission="talkListen" data-user="${p.id}" ${p.talkListen?'checked':''}>Écoute TB</label><button data-copy="${p.id}">COPIER MON MIX</button></th>`).join('')}</tr></thead><tbody>${(state.channels||[]).map((c,i)=>`<tr><th>${String(i+1).padStart(2,'0')} · ${esc(c.name)}</th>${users.map(p=>`<td><div class="matrix-cell"><input type="checkbox" data-assign="${i}" data-user="${p.id}" ${p.allowed[i]?'checked':''} aria-label="Assigner ${esc(c.name)} à ${esc(p.name)}"><input type="range" min="0" max="100" value="${Math.round(p.mix.channels[i].gain*100)}" data-matrix-gain="${i}" data-user="${p.id}" aria-label="Niveau ${esc(c.name)} pour ${esc(p.name)}"><button data-matrix-mute="${i}" data-user="${p.id}" class="${p.mix.channels[i].mute?'active':''}">M</button></div></td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 function applyPreset(){if(profile?.locked){notice('Mix verrouillé.');return}const role=$('#preset').value;const preferences={Batteur:['kick','snare','batterie'],Bassiste:['bass','basse','kick'],Guitariste:['guit','chant','vocal'],Clavier:['piano','key','clavier','chant'],Chant:['chant','vocal','piano'],Chef:[],Régisseur:[],Personnalisé:[]}[role]||[];mix.channels.forEach((c,i)=>{const meta=state?.channels?.[i];const text=(meta?.name+' '+meta?.role).toLowerCase();c.gain=preferences.some(x=>text.includes(x))?.8:.4;c.mute=false;c.solo=false;c.pan=0});edit();notice('Preset appliqué selon les noms/types des canaux. Ajuste ton écoute.')}
-async function outputs(){try{const devices=await navigator.mediaDevices?.enumerateDevices();$('#output').innerHTML='<option value="">Sortie système</option>'+(devices||[]).filter(d=>d.kind==='audiooutput').map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Sortie '+(i+1))}</option>`).join('');$('#outputInfo').textContent=audio.setSinkId?'Sélectionne une sortie exposée par ton navigateur.':'Choisis la sortie dans les réglages du téléphone ; ce navigateur ne permet pas de la changer.';$('#output').disabled=!audio.setSinkId}catch(e){notice(e.message)}}
-function setupMediaSession(){if(!('mediaSession'in navigator))return;try{navigator.mediaSession.metadata=new MediaMetadata({title:'FOSA · Mon mix',artist:profile?.name||'Audio Network'});navigator.mediaSession.setActionHandler('pause',()=>{mix.muteAll=true;edit()});navigator.mediaSession.setActionHandler('play',()=>{mix.muteAll=false;edit();audio.play()})}catch{}}
+async function outputs(){try{const devices=await navigator.mediaDevices?.enumerateDevices();$('#output').innerHTML='<option value="">Sortie système</option>'+(devices||[]).filter(d=>d.kind==='audiooutput').map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Sortie '+(i+1))}</option>`).join('');$('#outputInfo').textContent=audio.setSinkId?'Sélectionne une sortie exposée par ton navigateur.':'Choisis la sortie dans les réglages du téléphone ; ce navigateur ne permet pas de la changer.';$('#output').disabled=outputContext?!outputContext.setSinkId:!audio.setSinkId}catch(e){notice(e.message)}}
+function setupMediaSession(){if(!('mediaSession'in navigator))return;try{navigator.mediaSession.metadata=new MediaMetadata({title:'FOSA · Mon mix',artist:profile?.name||'Audio Network'});navigator.mediaSession.setActionHandler('pause',()=>{if(!profile?.locked){mix.muteAll=true;edit()}});navigator.mediaSession.setActionHandler('play',()=>{unlockOutput();if(!profile?.locked){mix.muteAll=false;edit()}if(!outputContext)audio.play().catch(()=>{})})}catch{}}
 function bind(){
  document.addEventListener('click',async e=>{const t=e.target.closest('button');if(!t)return;
  if(t.dataset.view)show(t.dataset.view);
@@ -154,31 +236,38 @@ function bind(){
  $$('#master,#liveMaster').forEach(e=>e.oninput=()=>{if(profile?.locked){syncMix();return}mix.master=Number(e.value)/100;edit()});
  $$('[data-solo]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);mix.channels[Number(b.dataset.solo)].solo=true;edit()};const release=()=>{if(mix.channels[Number(b.dataset.solo)].solo){mix.channels[Number(b.dataset.solo)].solo=false;edit()}};b.onpointerup=release;b.onpointercancel=release;b.onlostpointercapture=release;b.onkeydown=e=>{if(e.key===' '){e.preventDefault();mix.channels[Number(b.dataset.solo)].solo=true;edit()}};b.onkeyup=release;b.onblur=release});
  $('#matrix').onchange=async e=>{const t=e.target,p=state?.users?.find(p=>p.id===t.dataset.user);if(!p)return;try{if(t.dataset.permission)await api('matrix',{body:{id:p.id,[t.dataset.permission]:t.checked}});if(t.dataset.assign!==undefined){p.allowed[Number(t.dataset.assign)]=t.checked;await api('matrix',{body:{id:p.id,allowed:p.allowed}})}if(t.dataset.matrixGain!==undefined){p.mix.channels[Number(t.dataset.matrixGain)].gain=Number(t.value)/100;await api('mix',{body:{id:p.id,mix:p.mix}})}await refresh()}catch(err){notice(err.message)}};
- $('#detect').onclick=detect;$('#joinNetwork').onclick=join;$('#adminLogin').onclick=adminLogin;$('#scanInterfaces').onclick=scanInterfaces;
+ $('#detect').onclick=detect;$('#joinNetwork').onclick=()=>join(false);$('#joinListen').onclick=()=>join(true);$('#adminLogin').onclick=adminLogin;$('#scanInterfaces').onclick=scanInterfaces;
+ $('#lanAdapter').onchange=()=>updateSetup().catch(e=>notice(e.message));$('#testInput').onclick=testInput;
  $('#startCapture').onclick=async()=>{try{const s=await api('configure',{body:{device:Number($('#interfaceSelect').value),buffer:Number($('#bufferSelect').value)},timeout:12000});state=s;notice('Interface ouverte. Attente des premiers échantillons…');await refresh()}catch(e){notice(e.message)}};
  $('#startAudio').onclick=startAudio;$('#stopAudio').onclick=stopAudio;$('#muteAll').onclick=()=>{if(profile?.locked)return;mix.muteAll=!mix.muteAll;edit()};
  $('#saveMix').onclick=()=>{put(contextKey()+':saved',normalize(mix));notice('Mix sauvegardé sur cet appareil.')};$('#restoreMix').onclick=()=>{const saved=get(contextKey()+':saved',null);if(!saved){notice('Aucun mix sauvegardé pour ce profil.');return}if(profile?.locked)return;mix=normalize(saved);edit();notice('Mix restauré.')};$('#resetMix').onclick=()=>{if(profile?.locked)return;mix=blank();edit()};$('#applyPreset').onclick=applyPreset;
  $('#ducking').onchange=()=>{if(profile?.locked)return;mix.ducking=Number($('#ducking').value);edit()};$('#enableMic').onclick=enableMic;
  $$('.talk').forEach(b=>{b.onpointerdown=startTalk;b.onpointerup=stopTalk;b.onpointercancel=stopTalk;b.onlostpointercapture=stopTalk});addEventListener('blur',stopTalk);document.addEventListener('visibilitychange',()=>{if(document.hidden){stopTalk();if(mix.channels.some(c=>c.solo)){mix.channels.forEach(c=>c.solo=false);edit()}}else{if(wake)requestWake();refresh()}});
- $('#jitterTarget').onchange=applyJitter;$('#refreshOutputs').onclick=outputs;$('#output').onchange=async()=>{try{await audio.setSinkId($('#output').value);$('#outputInfo').textContent='Sortie sélectionnée : '+$('#output').selectedOptions[0].textContent}catch(e){notice('Sortie non modifiée : '+e.message)}};
+ $('#jitterTarget').onchange=applyJitter;$('#refreshOutputs').onclick=outputs;$('#output').onchange=async()=>{try{if(outputContext?.setSinkId)await outputContext.setSinkId($('#output').value);else if(!outputContext)await audio.setSinkId($('#output').value);else throw Error('Ce navigateur utilise la sortie système pour Web Audio');$('#outputInfo').textContent='Sortie sélectionnée : '+$('#output').selectedOptions[0].textContent}catch(e){notice('Sortie non modifiée : '+e.message)}};
  $('#wake').onclick=async()=>{if(wake){await wake.release();wake=null;$('#wake').classList.remove('active')}else requestWake()};
  $('#testLatency').onclick=async()=>{try{const start=performance.now();await api('health',{auth:false});$('#diagnosticNote').textContent=`Aller-retour HTTP : ${(performance.now()-start).toFixed(1)} ms. RTT WebRTC : ${fmt(telemetry.rtt)}. La latence audio bout-en-bout reste non mesurée : suis le test physique ci-dessous.`}catch(e){notice(e.message)}};
  $('#optimize').onclick=()=>{const stable=state?.xruns>0||telemetry.loss>1||telemetry.jitter>15;$('#jitterTarget').value=stable?'40':'20';applyJitter();$('#diagnosticNote').textContent=stable?'Cible réception portée à 40 ms. Après arrêt des écoutes, essaie un buffer ASIO 512 si des craquements persistent.':'Cible réception 20 ms. Garde le buffer ASIO 256 pour les premiers essais ; diminue-le seulement après vérification sans craquements.'};
- $('#makeQr').onclick=async()=>{if(!admin){notice('Console régisseur requise pour générer le QR local.');return}try{const url=new URL(server+'/network.html');url.searchParams.set('session',state.session);url.searchParams.set('role',$('#qrRole').value);$('#joinLink').value=url.href;const r=await fetch(server+'/api/qr?role='+encodeURIComponent($('#qrRole').value),{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('QR indisponible');if(qrObjectUrl)URL.revokeObjectURL(qrObjectUrl);qrObjectUrl=URL.createObjectURL(await r.blob());$('#qrBox').innerHTML='<img alt="QR de connexion FOSA">';$('#qrBox img').src=qrObjectUrl}catch(e){notice(e.message)}};
+ $('#makeQr').onclick=async()=>{if(!admin){notice('Console régisseur requise pour générer le QR local.');return}try{serverNetwork=await api('network');const url=new URL(serverNetwork.joinUrl),params=new URLSearchParams(url.hash.slice(1));params.set('role',$('#qrRole').value);url.hash=params.toString();const address=$('#lanAdapter').value;if(address)url.hostname=address;$('#joinLink').value=url.href;await sharedQr($('#qrBox'),$('#qrRole').value,address)}catch(e){notice(e.message)}};
  $('#copyLink').onclick=async()=>{try{if(!$('#joinLink').value)throw Error('Génère d’abord le lien.');await navigator.clipboard.writeText($('#joinLink').value);notice('Lien copié.')}catch(e){$('#joinLink').select();notice('Sélectionne et copie le lien. '+e.message)}};
  $('#forgetSession').onclick=()=>{stopAudio();delete credentials[server];put('fosa_network_credentials',credentials);admin='';profile=null;state=null;show('audio');paintStatus();notice('Profil déconnecté sur cet appareil.')};
  $('#backFosa').onclick=()=>window.parent.postMessage({type:'fosa-network-close'},location.origin);
- addEventListener('message',e=>{if(e.source!==window.parent||e.origin!==location.origin)return;if(e.data?.type==='fosa-network-view')show(e.data.view);if(e.data?.type==='fosa-talkback-activity'){externalTalk=e.data.active===true;audio.volume=externalTalk?(mix.ducking===-99?0:10**(mix.ducking/20)):1}});
+ addEventListener('message',e=>{if(e.source!==window.parent||e.origin!==location.origin)return;if(e.data?.type==='fosa-network-view')show(e.data.view);if(e.data?.type==='fosa-talkback-activity'){externalTalk=e.data.active===true;const gain=externalTalk?(mix.ducking===-99?0:10**(mix.ducking/20)):1;audio.volume=gain;if(outputGain)outputGain.gain.value=gain}});
  addEventListener('keydown',e=>{if(e.key==='Escape'&&embedded)window.parent.postMessage({type:'fosa-network-close'},location.origin)});addEventListener('beforeunload',e=>{if(desired){e.preventDefault();e.returnValue=''}});
 }
-async function requestWake(){try{wake=await navigator.wakeLock.request('screen');$('#wake').classList.add('active');wake.addEventListener('release',()=>$('#wake').classList.remove('active'))}catch{notice('Écran actif non disponible dans ce navigateur.')}}
+async function requestWake(){try{wake=await navigator.wakeLock.request('screen');$('#wake').classList.add('active');wake.addEventListener('release',()=>$('#wake').classList.remove('active'))}catch{notice('Écran actif non disponible sur ce lien. Garde FOSA visible et règle la veille de l’appareil si nécessaire.')}}
 async function boot(){
- buildMixer();bind();syncMix();$('#backFosa').hidden=!embedded;$('#profileName').value=get('fosa_name','')||localStorage.fosa_name||'';
- if(query.has('role')&&[...$('#profileRole').options].some(o=>o.value===query.get('role')))$('#profileRole').value=query.get('role');
+ buildMixer();bind();syncMix();$('#backFosa').hidden=!embedded;$('#profileName').value=get('fosa_name','')||getText('fosa_name');
+ document.body.classList.toggle('musician',musician);
+ if(inviteValue('role')&&[...$('#profileRole').options].some(o=>o.value===inviteValue('role')))$('#profileRole').value=inviteValue('role');
+ if(inviteValue('code'))$('#joinCode').value=inviteValue('code');
  // LAN page identifies its own server. Cloud app requires an explicit local URL.
- if(location.port==='8765'||['127.0.0.1','localhost'].includes(location.hostname)){server=location.origin;put('fosa_network_server',server)}
+ if(musician||query.has('console')||location.port==='8765'||['127.0.0.1','localhost'].includes(location.hostname)){server=location.origin;put('fosa_network_server',server)}
  $('#serverUrl').value=server;show(query.get('view')||'audio');paintStatus();renderDiagnostic();
- if(token()){try{const s=await api('state');state=s;profile=s.profile;if(profile){mix=normalize(get(contextKey(),profile.mix));changed=true;syncMix();await flush();show(query.get('view')||'mix');if(get('fosa_network_resume:'+server,false)){desired=true;startAudio()}}}catch{}}
+ if(musician){$('#welcomeCard h1').textContent='Rejoindre FOSA';$('#serverAddressForm').hidden=true}
+ try{await api('health',{auth:false,timeout:3000});if(query.has('console')&&['127.0.0.1','localhost'].includes(location.hostname)){
+  const r=await fetch(server+'/api/local-console',{method:'POST',headers:{'X-FOSA-Console':'1'}});if(!r.ok)throw Error('Console locale indisponible');admin=(await r.json()).token;state=await api('state');paintStatus();await scanInterfaces();await updateSetup();
+ }}catch(e){notice('Bridge inaccessible : '+e.message)}
+ if(token()&&!admin){try{const s=await api('state');state=s;profile=s.profile;if(profile){mix=normalize(profile.mix);changed=false;syncMix();show(query.get('view')||'live');if(get('fosa_network_resume:'+server,false)){desired=true;startAudio()}}}catch{}}
  setInterval(async()=>{await refresh();if(desired&&!connecting&&(!pc||['failed','disconnected','closed'].includes(pc.connectionState))&&Date.now()>=reconnectAt)startAudio()},1500);
  setInterval(pollMeters,125);
  setInterval(()=>{stats();sendControl()},700);

@@ -8,6 +8,7 @@ from collections import deque
 from fractions import Fraction
 import hmac
 import io
+import ipaddress
 import json
 from pathlib import Path
 import secrets
@@ -15,6 +16,8 @@ import socket
 import ssl
 import time
 import uuid
+import webbrowser
+from urllib.parse import urlencode, urlsplit
 
 import numpy as np
 import psutil
@@ -24,17 +27,18 @@ try:
 except (ImportError, OSError) as e:
     sd = None
     CAPTURE_IMPORT_ERROR = str(e)
-from aiohttp import web
+from aiohttp import web, ClientSession
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, MediaStreamTrack, RTCRtpSender
 from av import AudioFrame, AudioResampler
 import qrcode
 from qrcode.image.svg import SvgPathImage
 from mixer import CHANNELS, RATE, FRAME, clean_mix, default_mix, render_mix
+from lan import discover, configure_firewall
 CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioError,) if sd else ())
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.3-easy-lan"
+VERSION = "0.9.4-musicians"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -104,6 +108,9 @@ class Bridge:
         self.error = "Capture indisponible : " + CAPTURE_IMPORT_ERROR if CAPTURE_IMPORT_ERROR else "MR18 non connectée. Sélectionnez une interface."
         self.xruns = 0
         self.capture_drops = 0
+        self.run_id = secrets.token_hex(16)
+        self.last_mobile = None
+        self.network = getattr(args, "network", {"adapters": [], "firewall": {"state": "unverified"}, "selfCheck": "pending"})
         self.clients = {}
         self.tasks = []
         self.configure_lock = asyncio.Lock()
@@ -139,11 +146,12 @@ class Bridge:
             driver = apis[d["hostapi"]]["name"]
             mr18 = "mr18" in d["name"].lower()
             asio = "ASIO" in driver
-            usable = not (WINDOWS and mr18 and not asio)
+            midas_usb = "midas" in d["name"].lower() and ("usb" in d["name"].lower() or asio)
+            usable = not WINDOWS or asio
             out.append({"id": int(d["index"]), "name": d["name"], "driver": driver,
                         "inputs": int(d["max_input_channels"]), "defaultRate": float(d["default_samplerate"]),
-                        "mr18": bool(mr18), "asio": bool(asio), "usable": bool(usable),
-                        "reason": "" if usable else "MR18 multicanal sous Windows : pilote ASIO requis"})
+                        "mr18": bool(mr18), "midasUsb": bool(midas_usb), "asio": bool(asio), "usable": bool(usable),
+                        "reason": "" if usable else "Capture multicanal FOSA sous Windows : pilote ASIO requis"})
         return out
 
     def capture(self, data, frames, timing, status):
@@ -161,6 +169,7 @@ class Bridge:
         if self.stream:
             self.stream.close()
         self.stream = None
+        self.device = None
         self.raw.clear()
         self.last_capture = 0
         self.peaks.fill(0)
@@ -169,7 +178,7 @@ class Bridge:
         device = next((d for d in devices if d["id"] == device_id), None)
         if not device or device["inputs"] < CHANNELS:
             raise ValueError("Cette interface ne fournit pas 18 entrées simultanées")
-        if WINDOWS and device["mr18"] and not device["asio"]:
+        if WINDOWS and not device["asio"]:
             raise ValueError("MR18 détectée via " + device["driver"] + " : ASIO requis pour les 18 canaux séparés. Installe/active le pilote USB ASIO Midas.")
         self.wanted = {"name": device["name"], "driver": device["driver"]}
         self.buffer = buffer
@@ -179,6 +188,8 @@ class Bridge:
                                 latency="low", dtype="float32", extra_settings=extra, callback=self.capture)
         try:
             stream.start()
+            if stream.channels != CHANNELS or round(stream.samplerate) != RATE:
+                raise ValueError("Le pilote n’a pas ouvert 18 entrées à 48 kHz")
         except Exception:
             stream.close()
             raise
@@ -187,7 +198,9 @@ class Bridge:
         self.error = ""
 
     def connected(self):
-        return bool(self.stream and self.stream.active and time.monotonic() - self.last_capture < 1)
+        return bool(self.stream and self.device and self.stream.active and
+                    (not WINDOWS or self.device["asio"]) and self.stream.channels == CHANNELS and
+                    round(self.stream.samplerate) == RATE and time.monotonic() - self.last_capture < 1)
 
     def profile(self, req, admin=False):
         token = req.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -212,9 +225,10 @@ class Bridge:
             return round(20 * np.log10(max(float(v), 1e-6)), 1)
         return {"service": "fosa-audio-bridge", "version": VERSION, "protocol": 1,
                 "session": self.saved["session"], "experimental": True, "connected": connected,
-                "device": self.device, "sampleRate": RATE if connected else None,
+                "device": self.device, "sampleRate": self.stream.samplerate if connected else None,
                 "requestedRate": RATE, "buffer": self.stream.blocksize if connected else None,
-                "requestedBuffer": self.buffer, "inputs": CHANNELS if connected else 0,
+                "requestedBuffer": self.buffer, "inputs": self.stream.channels if connected else 0,
+                "mapping": [{"input": i+1, "channel": i+1, "verified": False} for i in range(CHANNELS)],
                 "captureLatencyMs": round(self.stream.latency * 1000, 2) if connected else None,
                 "audioLatencyMs": None, "latencyMethod": "Non mesurée : test physique nécessaire",
                 "opusFrameMs": 20, "cpu": self.cpu, "ramMB": round(self.process.memory_info().rss / 1048576, 1) if self.process else None,
@@ -227,7 +241,35 @@ class Bridge:
                              for i, c in enumerate(self.saved["channels"])]}
 
     async def health(self, req):
-        return json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION})
+        if req.remote and not ipaddress.ip_address(req.remote).is_loopback:
+            self.last_mobile = {"address": req.remote, "seenAt": time.time(), "stage": "Page accessible"}
+        return json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION, "runId": self.run_id})
+
+    async def local_console(self, req):
+        # Loopback alone is insufficient: reject DNS rebinding and cross-origin browser requests.
+        origin = req.headers.get("Origin")
+        if (not req.remote or not ipaddress.ip_address(req.remote).is_loopback or
+            req.url.host not in ("127.0.0.1", "localhost", "::1") or
+            req.headers.get("X-FOSA-Console") != "1" or
+            (origin and origin != f"{req.scheme}://{req.host}")):
+            raise web.HTTPForbidden(text="Console automatique disponible uniquement sur le PC serveur")
+        return json_response({"token": self.saved["admin"]})
+
+    def join_url(self, role="Personnalisé", address=None):
+        base = self.args.public_url.rstrip("/")
+        if address:
+            if address not in [a["address"] for a in self.network["adapters"]]:
+                raise ValueError("Cette adresse n’est pas une interface LAN détectée")
+            u = urlsplit(base)
+            base = f"{u.scheme}://{address}:{u.port or self.args.port}"
+        # The session code belongs to the shareable QR, never the private console key.
+        return base + "/network.html?musician=1#" + urlencode({"session": self.saved["session"],
+            "code": self.saved["joinCode"], "role": role})
+
+    async def network_status(self, req):
+        self.profile(req, admin=True)
+        return json_response(self.network | {"joinCode": self.saved["joinCode"],
+            "joinUrl": self.join_url(), "lastClient": self.last_mobile})
 
     async def join(self, req):
         b = await req.json()
@@ -238,6 +280,8 @@ class Bridge:
         if not hmac.compare_digest(str(b.get("code", "")), self.saved["joinCode"]):
             self.auth_failures[req.remote] = attempts + [now]
             raise web.HTTPUnauthorized(text="Code session incorrect")
+        if b.get("session") and b["session"] != self.saved["session"]:
+            raise web.HTTPConflict(text="Le QR correspond à une autre session. Scanne le QR actuel du PC.")
         if len(self.saved["profiles"]) >= 64:
             raise web.HTTPServiceUnavailable(text="Limite de 64 profils atteinte")
         pid = str(uuid.uuid4())
@@ -246,6 +290,8 @@ class Bridge:
              "mixVersion": 0, "allowed": [True]*CHANNELS, "locked": False, "talkAllowed": False, "talkListen": True}
         self.saved["profiles"][pid] = p
         self.persist()
+        if req.remote and not ipaddress.ip_address(req.remote).is_loopback:
+            self.last_mobile = {"address": req.remote, "seenAt": time.time(), "stage": "Profil rejoint"}
         return json_response({"token": p["token"], "profile": self.public_profile(p), "session": self.saved["session"]})
 
     async def get_state(self, req):
@@ -400,7 +446,7 @@ class Bridge:
             c["target"] = str(b.get("target", "all"))[:80]
             m = b.get("metrics")
             if isinstance(m, dict):
-                c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency")}
+                c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency", "playback", "packets")}
         return json_response({"ok": True, "talkAllowed": p["talkAllowed"]})
 
     async def disconnect(self, req):
@@ -412,8 +458,7 @@ class Bridge:
     async def qr(self, req):
         self.profile(req, admin=True)
         role = req.query.get("role", "Personnalisé")[:40]
-        from urllib.parse import urlencode
-        url = self.args.public_url.rstrip("/") + "/network.html?" + urlencode({"session": self.saved["session"], "role": role})
+        url = self.join_url(role, req.query.get("address"))
         out = io.BytesIO()
         qrcode.make(url, image_factory=SvgPathImage).save(out)
         return web.Response(body=out.getvalue(), content_type="image/svg+xml")
@@ -480,12 +525,15 @@ class Bridge:
                         devices = self.devices()
                         candidates = [d for d in devices if d["inputs"] >= CHANNELS and d.get("usable", True) and
                                       ((self.wanted and d["name"] == self.wanted["name"] and d["driver"] == self.wanted["driver"]) or
-                                       (not self.wanted and d["mr18"]))]
+                                       (not self.wanted and (d["mr18"] or d["midasUsb"])))]
                         candidates.sort(key=lambda d: not d["asio"])
                         if candidates:
                             await asyncio.to_thread(self.open_device, candidates[0]["id"], self.buffer)
                         else:
-                            self.error = "MR18 non connectée" if not self.wanted else "Interface déconnectée — reconnexion en cours"
+                            if not self.wanted and any(d["mr18"] or d["midasUsb"] for d in devices):
+                                self.error = "Midas détectée, mais aucun pilote ASIO avec 18 entrées disponible. Vérifie le pilote Midas 64 bits."
+                            else:
+                                self.error = "MR18 non connectée" if not self.wanted else "Interface déconnectée — reconnexion en cours"
                 except Exception as e:
                     self.error = str(e)
             for pid, c in list(self.clients.items()):
@@ -495,6 +543,29 @@ class Bridge:
 
     async def start(self, app):
         self.tasks = [asyncio.create_task(self.pump()), asyncio.create_task(self.monitor())]
+        if getattr(self.args, "musicians", False) or getattr(self.args, "open_browser", False):
+            self.tasks.append(asyncio.create_task(self.ready()))
+
+    async def ready(self):
+        """Wait for actual HTTP binding before showing the console; this isn't a remote probe."""
+        port = self.args.port
+        async with ClientSession() as client:
+            for _ in range(40):
+                try:
+                    url = self.args.public_url.rstrip("/") + "/api/health"
+                    async with client.get(url, timeout=1) as response:
+                        health = await response.json()
+                        if response.status != 200 or health.get("runId") != self.run_id:
+                            raise ValueError("Un autre service occupe ce port")
+                    self.network["selfCheck"] = "passed"
+                    self.network["selfCheckNote"] = "HTTP vérifié depuis ce PC. Accès depuis un téléphone en attente."
+                    if getattr(self.args, "open_browser", False):
+                        await asyncio.to_thread(webbrowser.open, f"http://127.0.0.1:{port}/network.html?console=1")
+                    return
+                except (OSError, ValueError, asyncio.TimeoutError):
+                    await asyncio.sleep(.25)
+        self.network["selfCheck"] = "failed"
+        self.network["selfCheckNote"] = "Le PC n’arrive pas à joindre le bridge sur l’adresse LAN sélectionnée."
     async def stop(self, app):
         for t in self.tasks:
             t.cancel()
@@ -537,6 +608,7 @@ class Bridge:
                         web.post('/api/mix', self.mix), web.post('/api/matrix', self.matrix),
                         web.post('/api/offer', self.offer), web.post('/api/control', self.control),
                         web.post('/api/disconnect', self.disconnect), web.get('/api/qr', self.qr)])
+        app.add_routes([web.post('/api/local-console', self.local_console), web.get('/api/network', self.network_status)])
         # Never expose state.json, admin keys, source tree or arbitrary filesystem paths.
         files = {'/': 'network.html', '/network.html': 'network.html', '/network.js': 'network.js',
                  '/network.css': 'network.css', '/fosa-icon.svg': 'fosa-icon.svg'}
@@ -559,8 +631,30 @@ if __name__ == '__main__':
     parser.add_argument('--public-url', default='http://127.0.0.1:8765')
     parser.add_argument('--allow-origin', action='append', default=[])
     parser.add_argument('--insecure-lan', action='store_true', help='HTTP LAN mode for easy listen-only mobile tests')
+    parser.add_argument('--musicians', action='store_true', help='Automatic LAN listen-only startup, QR and Windows firewall')
+    parser.add_argument('--open-browser', action='store_true', help='Open the local console only after the server is ready')
     parser.add_argument('--data-dir', default=str(Path.home()/'.fosa-audio'))
     args = parser.parse_args()
+    if args.musicians:
+        args.host = '0.0.0.0'
+        args.insecure_lan = True
+        try:
+            adapters = discover()
+        except Exception as e:
+            parser.exit(1, f'Diagnostic réseau indisponible : {e}\n')
+        if not adapters:
+            parser.exit(1, 'Aucun réseau Wi-Fi/Ethernet IPv4 local détecté. Connecte ce PC au réseau des musiciens.\n')
+        args.public_url = f'http://{adapters[0]["address"]}:{args.port}'
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((args.host, args.port))
+            except OSError:
+                parser.exit(1, f'Le port {args.port} est déjà occupé. Ferme le précédent bridge FOSA puis relance.\n')
+        print('DÉMARRER FOSA POUR LES MUSICIENS', flush=True)
+        print('Vérification du pare-feu ; Windows peut demander une autorisation au premier lancement.', flush=True)
+        firewall = configure_firewall(args.port, [a['address'] for a in adapters])
+        args.network = {"adapters": adapters, "firewall": firewall, "selfCheck": "pending"}
+        print(firewall['message'], flush=True)
     if args.host not in ('127.0.0.1', 'localhost', '::1') and not (args.cert and args.key) and not args.insecure_lan:
         parser.error('Le mode LAN exige --cert et --key (HTTPS), ou --insecure-lan pour le mode mobile rapide écoute seule.')
     bridge = Bridge(args)

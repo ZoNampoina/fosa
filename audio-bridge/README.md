@@ -1,35 +1,37 @@
-# FOSA Audio Network — v0.9.0 expérimentale
+# FOSA Audio Network — v0.9.4 expérimentale
 
 Cette version fournit un bridge local exécutable en Python, la capture PortAudio/ASIO, un moteur de mixage 18 → 2 par profil et une liaison WebRTC/Opus sur le réseau local. Elle s’intègre à FOSA sans remplacer son talkback existant.
 
 **Ce n’est pas encore une version validée pour un concert.** La MR18, le pilote Windows, les téléphones et la latence physique doivent être testés sur place. Aucun vumètre ni délai n’est simulé dans l’application.
 
-## Premier essai sur le PC Windows
+## Démarrer FOSA pour les musiciens
 
-1. Installer le pilote USB/ASIO officiel correspondant à la MR18 et à Windows, depuis le support Midas. Relier la console en **USB**, régler son routage USB et sa fréquence à **48 kHz**.
-2. Installer **Python 3.11 ou 3.12, 64 bits**. Télécharger le dépôt complet FOSA : GitHub → Code → Download ZIP. Extraire le ZIP ; garder `audio-bridge` à côté de `network.html`, `network.js` et `network.css`.
-3. Double-cliquer sur `audio-bridge/start-windows.cmd`. La première installation nécessite Internet. Le programme reste ensuite local ; laisser sa fenêtre ouverte. Si le navigateur arrive trop tôt, actualiser une fois le bridge démarré.
-4. Ouvrir `http://127.0.0.1:8765/network.html`. La fenêtre du bridge affiche un **code musiciens** et une **clé régisseur privée**. Ne pas partager la clé régisseur.
-5. Dans AUDIO → Console régisseur, saisir la clé privée. Actualiser les interfaces, sélectionner **MR18 / ASIO**, buffer **256**, puis OUVRIR 18 ENTRÉES. Une MR18 compatible est aussi sélectionnée automatiquement ; aucune autre interface n’est ouverte sans choix manuel.
-6. Nommer les canaux. Dans un autre navigateur ou sur le téléphone, rejoindre avec le code musiciens. Choisir MON MIX → ÉCOUTER. Commencer avec le volume du casque bas, puis augmenter progressivement.
+1. Relier la MR18 au PC par USB. Le pilote Midas ASIO 64 bits doit être installé et la console réglée à 48 kHz. Le PC et les musiciens doivent utiliser le même réseau local ; le PC peut être relié au routeur en RJ45.
+2. Télécharger le dépôt complet et l’extraire. Double-cliquer sur **audio-bridge/start-mobile-windows.cmd**. Python 3.11/3.12 64 bits reste un prérequis de cette version. Le lanceur installe ses dépendances au premier démarrage, sans commande à saisir.
+3. Windows peut demander une autorisation pour créer les règles de pare-feu FOSA. Seul ce réglage est élevé ; le bridge audio reste lancé avec les droits ordinaires. Les règles sont limitées au programme Python concerné, aux adresses LAN détectées et au sous-réseau local. Un refus est affiché ; FOSA ne prétend pas avoir configuré le pare-feu.
+4. La console locale s’ouvre **après** une réponse réelle du serveur HTTP. Elle affiche le QR, l’adresse exacte, le code session, l’interface réseau et les contrôles de démarrage. La MR18/Midas USB ASIO avec au moins 18 entrées est ouverte automatiquement lorsqu’elle est disponible.
+5. Sur Android/iPhone/tablette : même Wi-Fi → scanner le QR → saisir son nom et choisir son profil → **ÉCOUTER**. Le code session est déjà rempli. Aucun accès au micro ni certificat n’est demandé pour cette écoute.
+6. Ajuster le master et **MON MIX**. Le régisseur règle les permissions dans MATRIX. Chaque appareil garde son propre jeton et son propre mix.
 
-Le navigateur ne voit pas les 18 entrées ASIO. Il reçoit uniquement le mix stéréo calculé par le bridge. Le code active `SD_ENABLE_ASIO` avant d’importer sounddevice ; les wheels Windows récentes incluent la DLL PortAudio compatible ASIO. Si aucun pilote ASIO MR18 n’apparaît, vérifier le pilote officiel, l’architecture 64 bits et la disponibilité du périphérique dans un autre logiciel audio.
+Conserver la fenêtre FOSA ouverte sur le PC. **Fermer le navigateur du serveur n’arrête pas le bridge** ; fermer sa fenêtre de programme ou arrêter le PC l’arrête. Si le port est déjà occupé, le lanceur l’indique avant de modifier le pare-feu.
 
-## Téléphones / tablettes sur le LAN
+### Ce que vérifient les diagnostics
 
-Le mode PC ci-dessus écoute seulement sur le PC. Pour ouvrir le service au réseau local :
+- L’adresse proposée vient d’un adaptateur physique Wi-Fi/Ethernet avec IPv4 LAN. Les interfaces VPN, WARP, Tailscale, virtuelles et Bluetooth sont exclues. Si plusieurs LAN sont présents, choisir le réseau à partager dans la console ; les QR sont régénérés pour cette adresse.
+- Le contrôle HTTP depuis le PC confirme que **ce bridge** répond sur l’adresse affichée. Il ne prouve pas que le téléphone peut passer le pare-feu ou l’isolation du routeur. La première requête distante est affichée séparément.
+- La vérification des règles Windows ne garantit pas l’absence d’un blocage par un antivirus, une politique d’entreprise ou le point d’accès. Si le téléphone n’envoie aucune requête, FOSA affiche les causes possibles sans en inventer une.
+- Le client distingue liaison WebRTC, arrivée de paquets audio, source absente et sortie navigateur suspendue. Le diagnostic affiche aussi RTT, jitter, pertes, buffer de réception et XRUN. Ces valeurs ne sont pas la latence audio physique.
+- Le sélecteur ASIO demande les canaux 0 à 17 dans l’ordre. Dans DIAGNOSTIC, **Tester le mapping des entrées** observe où arrive le signal d’une seule entrée physique. Le routage USB dans la MR18 peut modifier cette correspondance.
 
-1. Fermer le premier bridge. Relier de préférence le PC au routeur en RJ45. Connecter les téléphones au même réseau Wi-Fi ; désactiver l’isolation des clients sur le point d’accès si nécessaire.
-2. Double-cliquer sur `start-lan-windows.cmd`. Saisir l’IPv4 privée du PC, visible avec `ipconfig`, par exemple `192.168.1.10`. Réserver cette adresse dans le routeur pour qu’elle reste stable.
-3. Le script crée un certificat HTTPS local. Copier **uniquement** `certs/fosa-local-ca.crt` vers les appareils personnels qui rejoindront FOSA. Garder tous les `.key` privés sur le PC.
-4. Installer cette autorité locale comme certificat de confiance sur ces appareils. Sur iPhone/iPad, l’installation du profil doit être suivie de l’activation de sa confiance dans les réglages de certificats. Sous Android, utiliser l’installation de certificat CA dans les réglages de sécurité ; l’intitulé varie selon le fabricant. Retirer cette autorité des appareils après les essais si elle n’est plus utilisée. L’application ne modifie jamais automatiquement la confiance des certificats.
-5. Autoriser Python dans le pare-feu Windows **sur le réseau privé**. Ne pas rediriger ce port vers Internet. Autoriser le port TCP 8765 pour l’interface et les ports UDP utilisés par WebRTC via la règle d’application Python.
-6. Sur le téléphone, ouvrir `https://ADRESSE_DU_PC:8765/network.html`. Le certificat doit être reconnu pour que les fonctions du navigateur, notamment le micro, soient disponibles.
-7. Rejoindre avec le code musiciens puis toucher ÉCOUTER. Dans MATRIX, le régisseur peut autoriser le micro, verrouiller le mix et limiter les canaux.
+Si la page s’ouvre mais pas le son, vérifier la réception des paquets et l’état de la sortie dans DIAGNOSTIC. Un blocage UDP peut empêcher WebRTC alors que TCP permet d’ouvrir la page. Si la sortie est suspendue après un rechargement ou un retour d’arrière-plan, toucher ÉCOUTER à nouveau peut être nécessaire.
 
-Dans FOSA hébergé, AUDIO peut aussi se connecter à cette adresse HTTPS. Certains navigateurs demandent l’accès au réseau local ou bloquent l’accès depuis un site public. Dans ce cas, ouvrir directement l’adresse HTTPS locale du bridge. Ne pas désactiver les protections du navigateur.
+### Mode PC local et micro talkback
 
-**Sans Internet :** ouvrir l’adresse locale du bridge. Son interface, ses réglages, sa signalisation et son audio n’utilisent ni CDN ni Supabase. L’application FOSA publique et son ancien talkback conservent leurs dépendances antérieures. La session audio LAN fonctionne indépendamment.
+`start-windows.cmd` conserve le mode local, sur `http://127.0.0.1:8765`. La console automatique n’est accessible que depuis le PC serveur : adresse loopback, origine locale et en-tête spécifique sont vérifiés. Les appareils distants ne reçoivent jamais la clé régisseur par ce mécanisme.
+
+Le mode mobile simple est **écoute seule**. Sur un HTTP LAN non sécurisé, le micro talkback et le verrouillage de veille peuvent être indisponibles ; les boutons l’indiquent clairement. L’accès au micro sur mobile exige un contexte sécurisé reconnu par le navigateur. L’ancien `start-lan-windows.cmd` reste un mode HTTPS avancé avec certificat local, réservé aux essais du micro : il ne fait pas partie du parcours QR → ÉCOUTER. L’intégration d’un HTTPS de confiance transparent ou d’un client natif reste à réaliser pour le talkback mobile.
+
+Le QR contient le code musiciens dans le fragment du lien, jamais la clé régisseur. Partager le QR donne accès à la session d’écoute. L’interface locale et l’audio fonctionnent sans Internet après la première installation. Ne pas rediriger le port du PC vers Internet.
 
 ## Commandes manuelles
 
@@ -55,13 +57,13 @@ Sous Linux, installer PortAudio via le gestionnaire de paquets du système. Si l
 - Chaque musicien possède son profil, son mix, son master, ses mute et son panoramique. Le solo est temporaire ; il ne modifie pas les autres profils et n’est pas sauvegardé. Les presets de rôle s’appuient sur les noms et types des canaux. Ils doivent être ajustés à l’orchestre.
 - Sauvegarder/restaurer conserve un instantané sur cet appareil. Les réglages courants sont aussi stockés par le bridge dans le dossier utilisateur `.fosa-audio`. Le jeton d’accès au profil reste dans le navigateur. Pas de synchronisation de comptes Supabase dans cette version.
 - MATRIX applique les autorisations côté serveur : assignations, verrouillage du mix, émission et réception talkback. Un simple choix du rôle « Régisseur » ne donne aucun droit.
-- Le QR et le lien NFC contiennent l’adresse HTTPS, la session et le rôle proposé, **pas les clés**. Le code musiciens reste nécessaire. Les liens `fosa://` et la programmation NFC native ne sont pas enregistrés par cette version.
+- Le QR et le lien NFC contiennent l’adresse LAN, la session, le rôle proposé et le code musiciens, **jamais la clé régisseur**. Les liens `fosa://` et la programmation NFC native ne sont pas enregistrés par cette version.
 - TALKBACK LAN utilise un micro autorisé et une commande maintenue. Le serveur ferme cette commande après 1,5 seconde sans renouvellement. Les destinations LAN proposées sont « Tous » et les rôles musicaux ; le contrat serveur accepte aussi un identifiant de profil.
 - Un limiteur de crête de sortie évite le dépassement numérique, sans remplacer le réglage physique du volume ni une protection auditive dédiée.
 
 ## Ce qui est réel, ce qui reste à valider
 
-| Élément | État v0.9.0 |
+| Élément | État v0.9.4 |
 |---|---|
 | Écrans, 18 canaux, réglages locaux, profils, permissions serveur | Implémentés et testés logiciellement |
 | Capture 18 entrées à 48 kHz, détection ASIO, buffer, reconnexion | Code réel ; essai MR18/Windows nécessaire |
@@ -99,10 +101,18 @@ Depuis la racine du dépôt :
 python -m unittest discover -s audio-bridge/tests -v
 ```
 
-Sept tests vérifient l’isolation des mixes, les gains/pan, mute/solo/ducking, les bornes de saisie, les permissions et la persistance, puis le transport WebRTC stéréo en boucle locale. Le test WebRTC injecte un signal connu exclusivement dans son banc. Aucun mode démo audio n’est exposé par le produit.
+Les tests vérifient l’isolation des mixes, les gains/pan, mute/solo/ducking, les bornes de saisie, les permissions et la persistance, puis le transport WebRTC stéréo en boucle locale. Le test WebRTC injecte un signal connu exclusivement dans son banc. Aucun mode démo audio n’est exposé par le produit.
 
 ## Références techniques
 
 - [Midas MR18](https://midasconsoles.com/en/products/0605-aaf)
 - [sounddevice : installation ASIO sous Windows](https://python-sounddevice.readthedocs.io/en/0.5.3/installation.html)
 - [aiortc : API WebRTC](https://aiortc.readthedocs.io/en/latest/api.html)
+
+## Vérification et publication
+
+Le workflow Verify FOSA Audio lance les tests du bridge sous Linux et Windows, vérifie le helper PowerShell et exerce les navigateurs avec une source numérique connue uniquement dans le banc de test. Les vues PC, Android et tablette sont vérifiées avec Chromium ; iPhone/iPad avec WebKit et des vues mobiles. **Ces émulations ne remplacent pas des appareils physiques.** Les tests navigateur utilisent une vraie origine HTTP LAN non sécurisée, les endpoints du bridge et son flux Opus.
+
+GitHub Pages dépend maintenant de ces vérifications. Les anciens workflows de migration ne sont pas déclenchés par les modifications de ce module. Le bridge Windows doit être actualisé sur le PC : publier la page web ne remplace pas les fichiers déjà téléchargés.
+
+Voir [AUDIT.md](AUDIT.md) pour les constats et les limites de validation.

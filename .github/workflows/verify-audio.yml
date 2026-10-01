@@ -1,0 +1,57 @@
+name: Verify FOSA Audio
+on:
+  push:
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  bridge:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python -m pip install -r audio-bridge/requirements.txt
+      - run: python -m unittest discover -s audio-bridge/tests -v
+      - run: node --check network.js
+      - run: git diff --check
+      - name: Parse Windows firewall helper
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/audio-bridge/configure-firewall.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if($errors.Count){$errors | Format-List; exit 1}
+          python -c "import sys; sys.path.insert(0,'audio-bridge'); from lan import discover; print(discover())"
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python -m pip install -r audio-bridge/requirements.txt
+      - run: npm install --prefix "$RUNNER_TEMP/fosa-browser" playwright@1.63.0
+      - run: node "$RUNNER_TEMP/fosa-browser/node_modules/playwright/cli.js" install --with-deps chromium webkit
+      - name: Verify actual HTTP audio in browsers
+        env:
+          NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
+          FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
+        run: node audio-bridge/tests/browser_flow.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fosa-browser-verification
+          path: ${{ runner.temp }}/fosa-browser-output
