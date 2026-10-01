@@ -564,6 +564,19 @@ if __name__ == '__main__':
         parser.error('Le mode LAN exige --cert et --key (HTTPS). Voir README.')
     bridge = Bridge(args)
     print(f'FOSA Audio Bridge {VERSION}\nConsole : {args.public_url}/network.html')
+    if sd is not None:
+        try:
+            hostapis = [h["name"] for h in sd.query_hostapis()]
+            mr18s = [d for d in bridge.devices() if d["mr18"]]
+            print("Pilotes audio : " + (", ".join(hostapis) if hostapis else "aucun"))
+            if mr18s:
+                for d in mr18s:
+                    flag = "OK ASIO" if d["asio"] else "NON COMPATIBLE 18CH (ASIO requis)"
+                    print(f'MR18 : {d["name"]} · {d["driver"]} · {d["inputs"]} IN · {flag}')
+            else:
+                print("MR18 : aucune interface audio détectée")
+        except Exception as e:
+            print("Diagnostic audio indisponible :", e)
     print(f'Code musiciens : {bridge.saved["joinCode"]}\nClé régisseur (privée) : {bridge.saved["admin"]}')
     context = None
     if args.cert and args.key:
