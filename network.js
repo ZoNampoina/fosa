@@ -14,7 +14,7 @@ const normalize = value => {
 };
 let server=get('fosa_network_server',''),credentials=get('fosa_network_credentials',{}),admin='',state=null,profile=null;
 let mix=normalize(get('fosa_network_draft',blank())),page='audio',pc=null,mic=null,transceiver=null,micEnabled=false,talking=false;
-let desired=false,connecting=false,connectingGeneration=0,reconnectAt=0,retry=0,changed=false,sending=false,polling=false,refreshId=0;
+let desired=false,connecting=false,connectingGeneration=0,reconnectAt=0,retry=0,changed=false,sending=false,polling=false,meterPolling=false,refreshId=0;
 let localRevision=0, confirmedMixVersion=0;
 let telemetry={rtt:null,jitter:null,loss:null,buffer:null},previousStats=null,wake=null,externalTalk=false,qrObjectUrl=null;
 const audio=$('#monitorAudio'), query=new URLSearchParams(location.search);
@@ -71,6 +71,19 @@ function edit(){localRevision++;changed=true;syncMix();const durable=normalize(m
 async function flush(){
  if(sending||!changed||!profile||!state||admin)return;sending=true;const sent=JSON.stringify(mix);
  try{const ack=await api('mix',{body:{mix}});confirmedMixVersion=ack.mixVersion||0;if(JSON.stringify(mix)===sent)changed=false}catch(e){notice(e.message)}finally{sending=false;paintStatus();if(changed&&JSON.stringify(mix)!==sent)flush()}
+}
+async function pollMeters(){
+ if(!token()||!state||meterPolling||document.hidden||!['mix','live'].includes(page))return;
+ meterPolling=true;
+ try{
+  const m=await api('meters',{timeout:1500});
+  state.connected=!!m.connected;
+  if(Array.isArray(m.channels)&&Array.isArray(state.channels)){
+   state.channels=state.channels.map((c,i)=>Object.assign({},c,m.channels[i]||{}));
+  }
+  paintStatus();updateMeters();
+ }catch{}
+ finally{meterPolling=false}
 }
 async function refresh(){
  if(!token()||polling)return;polling=true;
@@ -167,6 +180,7 @@ async function boot(){
  $('#serverUrl').value=server;show(query.get('view')||'audio');paintStatus();renderDiagnostic();
  if(token()){try{const s=await api('state');state=s;profile=s.profile;if(profile){mix=normalize(get(contextKey(),profile.mix));changed=true;syncMix();await flush();show(query.get('view')||'mix');if(get('fosa_network_resume:'+server,false)){desired=true;startAudio()}}}catch{}}
  setInterval(async()=>{await refresh();if(desired&&!connecting&&(!pc||['failed','disconnected','closed'].includes(pc.connectionState))&&Date.now()>=reconnectAt)startAudio()},1500);
+ setInterval(pollMeters,125);
  setInterval(()=>{stats();sendControl()},700);
  if(navigator.getBattery)navigator.getBattery().then(b=>{const paint=()=>$('#battery').textContent=Math.round(b.level*100)+' %'+(b.charging?' · charge':'');paint();b.addEventListener('levelchange',paint);b.addEventListener('chargingchange',paint)}).catch(()=>{});
 }
