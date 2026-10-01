@@ -117,8 +117,8 @@ class Bridge:
             return []
         apis = sd.query_hostapis()
         return [{"id": int(d["index"]), "name": d["name"], "driver": apis[d["hostapi"]]["name"],
-                 "inputs": d["max_input_channels"], "defaultRate": d["default_samplerate"],
-                 "mr18": "mr18" in d["name"].lower(), "asio": "ASIO" in apis[d["hostapi"]]["name"]}
+                 "inputs": int(d["max_input_channels"]), "defaultRate": float(d["default_samplerate"]),
+                 "mr18": bool("mr18" in d["name"].lower()), "asio": bool("ASIO" in apis[d["hostapi"]]["name"]) }
                 for d in sd.query_devices() if d["max_input_channels"] > 0]
 
     def capture(self, data, frames, timing, status):
@@ -195,8 +195,8 @@ class Bridge:
                 "error": self.error, "clients": sum(c["pc"].connectionState == "connected" for c in self.clients.values()),
                 "channels": [dict(c, rmsDb=db(self.rms[i]) if connected else None,
                                   peakDb=db(self.peaks[i]) if connected else None, active=connected,
-                                  signal=connected and self.rms[i] > 1e-4,
-                                  clipping=connected and time.monotonic()-self.clip_at[i] < 2)
+                                  signal=bool(connected and self.rms[i] > 1e-4),
+                                  clipping=bool(connected and time.monotonic()-self.clip_at[i] < 2))
                              for i, c in enumerate(self.saved["channels"])]}
 
     async def health(self, req):
