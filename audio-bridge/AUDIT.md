@@ -34,6 +34,8 @@ Le serveur est un processus indépendant du navigateur et reste actif si celui-c
 
 Les tests logiciels et les résultats GitHub Actions doivent être lus avec leur contexte : les signaux générés existent exclusivement dans les fixtures de test, jamais dans le produit. Chromium/WebKit avec une vue mobile vérifient un navigateur, pas le Wi-Fi, les écouteurs, la politique iOS ou le driver ASIO d’un appareil réel.
 
+Un test Windows crée une vraie `.venv` et vérifie que les règles pare-feu ciblent l’image du processus serveur. Le `python.exe` de la `.venv` est un lanceur qui peut rediriger vers le runtime de base ; son chemin seul ne suffit pas pour le filtre d’application Windows.
+
 À confirmer sur place : MR18 ASIO 64 bits, fréquence réelle, Input 1/2/3 puis les autres entrées, première connexion Android et iPhone, deux mixes différents, stabilité prolongée, perte et retour du Wi-Fi, écouteurs filaires et mesure physique du délai.
 
 ## Références de conception

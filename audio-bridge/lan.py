@@ -76,17 +76,23 @@ def discover():
                                  "up": bool(stats.get(name) and stats[name].isup), "type": "Réseau local"})
     return select_adapters(rows)
 
+def firewall_program():
+    # On Windows a venv python.exe redirects to a separate base-runtime process.
+    # Firewall application filters must match the process image, not sys.executable.
+    return psutil.Process().exe() if os.name == "nt" else sys.executable
+
 def configure_firewall(port, addresses):
     if os.name != "nt":
         return {"state": "unverified", "message": "Pare-feu de cet OS non vérifié automatiquement."}
     helper = str(Path(__file__).with_name("configure-firewall.ps1"))
     def quoted(s):
         return "'" + str(s).replace("'", "''") + "'"
-    invoke = f"& {quoted(helper)} -Port {port} -PythonExe {quoted(sys.executable)} -Addresses {quoted(','.join(addresses))}"
     try:
+        program = firewall_program()
+        invoke = f"& {quoted(helper)} -Port {port} -PythonExe {quoted(program)} -Addresses {quoted(','.join(addresses))}"
         checked = json.loads(powershell(invoke + " -CheckOnly"))
         if checked.get("ok"):
-            return {"state": "configured", "message": "Règles FOSA vérifiées · sous-réseau local uniquement."}
+            return {"state": "configured", "program": program, "message": "Règles FOSA vérifiées · sous-réseau local uniquement."}
         # Only this firewall helper is elevated; capture and the browser stay unprivileged.
         command = invoke
         encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
@@ -95,6 +101,6 @@ def configure_firewall(port, addresses):
         checked = json.loads(powershell(invoke + " -CheckOnly"))
         if not checked.get("ok"):
             raise RuntimeError("Les règles FOSA n’ont pas pu être vérifiées.")
-        return {"state": "configured", "message": "Règles FOSA vérifiées · sous-réseau local uniquement."}
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
-        return {"state": "blocked", "message": "Autorisation Windows refusée ou pare-feu géré par une politique : " + str(e)[:300]}
+        return {"state": "configured", "program": program, "message": "Règles FOSA vérifiées · sous-réseau local uniquement."}
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, psutil.Error) as e:
+        return {"state": "blocked", "message": "Pare-feu non confirmé (autorisation Windows ou politique à vérifier) : " + str(e)[:300]}
