@@ -34,7 +34,7 @@ CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioErro
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.2-asiofix"
+VERSION = "0.9.3-easy-lan"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -558,10 +558,11 @@ if __name__ == '__main__':
     parser.add_argument('--key')
     parser.add_argument('--public-url', default='http://127.0.0.1:8765')
     parser.add_argument('--allow-origin', action='append', default=[])
+    parser.add_argument('--insecure-lan', action='store_true', help='HTTP LAN mode for easy listen-only mobile tests')
     parser.add_argument('--data-dir', default=str(Path.home()/'.fosa-audio'))
     args = parser.parse_args()
-    if args.host not in ('127.0.0.1', 'localhost', '::1') and not (args.cert and args.key):
-        parser.error('Le mode LAN exige --cert et --key (HTTPS). Voir README.')
+    if args.host not in ('127.0.0.1', 'localhost', '::1') and not (args.cert and args.key) and not args.insecure_lan:
+        parser.error('Le mode LAN exige --cert et --key (HTTPS), ou --insecure-lan pour le mode mobile rapide écoute seule.')
     bridge = Bridge(args)
     print(f'FOSA Audio Bridge {VERSION}\nConsole : {args.public_url}/network.html')
     if sd is not None:
