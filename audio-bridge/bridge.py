@@ -33,7 +33,22 @@ from mixer import CHANNELS, RATE, FRAME, clean_mix, default_mix, render_mix
 CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioError,) if sd else ())
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.9.0-experimental"
+VERSION = "0.9.1-jsonfix"
+
+# aiohttp uses the standard json module, which does not serialize NumPy scalar types.
+# Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
+def _json_default(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+def _json_dumps(data):
+    return json.dumps(data, default=_json_default)
+
+def json_response(data, **kwargs):
+    return json_response(data, dumps=_json_dumps, **kwargs)
 
 class StereoTrack(MediaStreamTrack):
     kind = "audio"
@@ -200,7 +215,7 @@ class Bridge:
                              for i, c in enumerate(self.saved["channels"])]}
 
     async def health(self, req):
-        return web.json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION})
+        return json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION})
 
     async def join(self, req):
         b = await req.json()
@@ -219,7 +234,7 @@ class Bridge:
              "mixVersion": 0, "allowed": [True]*CHANNELS, "locked": False, "talkAllowed": False, "talkListen": True}
         self.saved["profiles"][pid] = p
         self.persist()
-        return web.json_response({"token": p["token"], "profile": self.public_profile(p), "session": self.saved["session"]})
+        return json_response({"token": p["token"], "profile": self.public_profile(p), "session": self.saved["session"]})
 
     async def get_state(self, req):
         p = self.profile(req)
@@ -228,11 +243,11 @@ class Bridge:
         result["admin"] = p is None
         if p is None:
             result["users"] = [self.public_profile(v) for v in self.saved["profiles"].values()]
-        return web.json_response(result)
+        return json_response(result)
 
     async def list_devices(self, req):
         self.profile(req, admin=True)
-        return web.json_response({"devices": self.devices()})
+        return json_response({"devices": self.devices()})
 
     async def configure(self, req):
         self.profile(req, admin=True)
@@ -248,7 +263,7 @@ class Bridge:
             except Exception as e:
                 self.error = str(e)
                 raise ValueError("Capture : " + str(e)) from e
-        return web.json_response(self.status())
+        return json_response(self.status())
 
     async def channels(self, req):
         self.profile(req, admin=True)
@@ -260,7 +275,7 @@ class Bridge:
             if key in b:
                 self.saved["channels"][i][key] = str(b[key])[:60]
         self.persist()
-        return web.json_response({"ok": True})
+        return json_response({"ok": True})
 
     async def mix(self, req):
         caller = self.profile(req)
@@ -274,7 +289,7 @@ class Bridge:
         self.solo_until[p["id"]] = time.monotonic()+1.5
         p["mixVersion"] = p.get("mixVersion", 0)+1
         self.persist()
-        return web.json_response({"mix": p["mix"], "mixVersion": p["mixVersion"]})
+        return json_response({"mix": p["mix"], "mixVersion": p["mixVersion"]})
 
     async def matrix(self, req):
         self.profile(req, admin=True)
@@ -290,7 +305,7 @@ class Bridge:
                 raise ValueError("18 assignations requises")
             p["allowed"] = [v is True for v in b["allowed"]]
         self.persist()
-        return web.json_response(self.public_profile(p))
+        return json_response(self.public_profile(p))
 
     async def close_client(self, pid):
         c = self.clients.pop(pid, None)
@@ -329,7 +344,7 @@ class Bridge:
                 if t.kind == "audio":
                     t.setCodecPreferences(opus)
             await pc.setLocalDescription(await pc.createAnswer())
-            return web.json_response({"type": "answer", "sdp": pc.localDescription.sdp})
+            return json_response({"type": "answer", "sdp": pc.localDescription.sdp})
         except Exception:
             await self.close_client(p["id"])
             raise
@@ -360,13 +375,13 @@ class Bridge:
             m = b.get("metrics")
             if isinstance(m, dict):
                 c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency")}
-        return web.json_response({"ok": True, "talkAllowed": p["talkAllowed"]})
+        return json_response({"ok": True, "talkAllowed": p["talkAllowed"]})
 
     async def disconnect(self, req):
         p = self.profile(req)
         if p:
             await self.close_client(p["id"])
-        return web.json_response({"ok": True})
+        return json_response({"ok": True})
 
     async def qr(self, req):
         self.profile(req, admin=True)
@@ -477,9 +492,9 @@ class Bridge:
                 try:
                     response = await handler(req)
                 except web.HTTPException as e:
-                    response = web.json_response({"error": e.text}, status=e.status)
+                    response = json_response({"error": e.text}, status=e.status)
                 except CAPTURE_ERRORS as e:
-                    response = web.json_response({"error": str(e)}, status=400)
+                    response = json_response({"error": str(e)}, status=400)
             if origin:
                 response.headers.update({"Access-Control-Allow-Origin": origin, "Vary": "Origin",
                     "Access-Control-Allow-Headers": "Authorization, Content-Type",
