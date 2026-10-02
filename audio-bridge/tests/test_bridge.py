@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from aiortc import RTCPeerConnection, RTCConfiguration, RTCSessionDescription
 from bridge import Bridge
@@ -49,7 +50,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status,403)
 
     async def test_secure_rpc_never_exposes_console_or_another_profile(self):
-        for path in ['local-console', 'network', 'matrix', 'configure', '../state.json']:
+        for path in ['local-console', 'regisseur', 'network', 'matrix', 'configure', '../state.json']:
             result = await self.bridge.musician_rpc({'path':path, 'token':self.joined['token'], 'body':{}})
             self.assertEqual(result['status'],403)
         result = await self.bridge.musician_rpc({'path':'state', 'token':self.bridge.saved['admin']})
@@ -60,6 +61,50 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['data']['profile']['id'],self.pid)
         result = await self.bridge.musician_rpc({'path':'control', 'token':self.joined['token'], 'body':None})
         self.assertEqual(result['status'],400)
+
+    async def test_local_regisseur_identity_is_private_persistent_and_audio_only(self):
+        headers = self.admin | {'X-FOSA-Console':'1'}
+        response = await self.client.post('/api/regisseur', headers=headers)
+        self.assertEqual(response.status,200)
+        operator = await response.json()
+        pid = operator['profile']['id']
+        self.assertEqual(operator['profile']['name'],'Régisseur PC')
+        self.assertTrue(operator['profile']['talkAllowed'])
+        self.assertEqual(operator['profile']['mix']['master'],0)
+        self.assertNotEqual(operator['token'],self.bridge.saved['admin'])
+        auth = {'Authorization':'Bearer '+operator['token']}
+        state = await (await self.client.get('/api/state', headers=auth)).json()
+        self.assertFalse(state['admin'])
+        self.assertNotIn('users',state)
+        self.assertEqual(state['profile']['id'],pid)
+        self.assertEqual((await self.client.post('/api/matrix',headers=auth,
+                         json={'id':self.pid,'talkAllowed':True})).status,401)
+        again = await (await self.client.post('/api/regisseur',headers=headers)).json()
+        self.assertEqual(again['token'],operator['token'])
+        self.assertEqual(len(self.bridge.saved['profiles']),2)
+        restarted = Bridge(self.bridge.args)
+        self.assertEqual(restarted.saved['regisseurProfile'],pid)
+        self.assertEqual(restarted.saved['profiles'][pid]['token'],operator['token'])
+        await self.client.post('/api/matrix',headers=self.admin,json={'id':pid,'talkAllowed':False})
+        again = await (await self.client.post('/api/regisseur',headers=headers)).json()
+        self.assertFalse(again['profile']['talkAllowed'],'Opening the console must preserve a revoked permission')
+
+    async def test_regisseur_profile_requires_authenticated_same_origin_loopback(self):
+        for headers, status in [({},401), (self.auth | {'X-FOSA-Console':'1'},401),
+                                (self.admin,403),
+                                (self.admin | {'X-FOSA-Console':'1','Host':'attacker.example'},403),
+                                (self.admin | {'X-FOSA-Console':'1','Origin':'https://evil.example'},403)]:
+            response = await self.client.post('/api/regisseur',headers=headers)
+            self.assertEqual(response.status,status)
+        self.assertNotIn('regisseurProfile',self.bridge.saved)
+        with self.assertRaises(web.HTTPForbidden):
+            self.bridge.require_local_console(SimpleNamespace(remote='192.168.1.44',
+                url=SimpleNamespace(host='127.0.0.1'),headers={'X-FOSA-Console':'1'},scheme='http',host='127.0.0.1:8765'))
+        result = await self.bridge.musician_rpc({'path':'regisseur','token':self.bridge.saved['admin'],'body':{}})
+        self.assertEqual(result['status'],403)
+        ordinary = await (await self.client.post('/api/join',json={
+            'code':self.bridge.saved['joinCode'],'name':'Un autre régisseur','role':'Régisseur'})).json()
+        self.assertFalse(ordinary['profile']['talkAllowed'])
 
     async def test_release_and_revocation_cannot_be_reopened_by_old_control(self):
         from bridge import StereoTrack

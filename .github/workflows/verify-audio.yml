@@ -67,6 +67,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
           FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
         run: node audio-bridge/tests/low_latency_browser_flow.cjs
+      - name: Verify direct PC operator microphone and console permissions
+        env:
+          NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
+          FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
+        run: node audio-bridge/tests/regisseur_browser_flow.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

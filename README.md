@@ -88,3 +88,9 @@ Un second moteur de monitoring PCM stéréo 48 kHz, 16 bits, transmet des blocs 
 La restitution utilise AudioWorklet, avec un buffer ciblé de 5/10/20/40 ms et des compteurs de sous-alimentation, de paquets tardifs et de données abandonnées. L’audio PCM nécessite le QR HTTPS sur mobile et consomme environ 1,54 Mbit/s par auditeur, hors en-têtes réseau. Le talkback et les permissions MATRIX sont communs aux deux moteurs.
 
 **5 ms est la durée d’un bloc, pas une latence audio mesurée.** Cette version utilise encore le navigateur et le transport WebRTC SCTP/DTLS ; elle ne constitue pas une application audio native UDP/AAudio/CoreAudio. Le système et la sortie audio ajoutent leurs propres buffers. Les essais logiciels ne valident pas une latence garantie avec la MR18 ou des téléphones physiques.
+
+## v0.9.7 — Régisseur PC direct
+
+`audio-bridge/start-low-latency-windows.cmd` ouvre directement **Régisseur · PC serveur** dans LIVE, sans code session à saisir. Le profil audio du PC possède sa permission micro dès sa création. **ACTIVER MON MICRO** établit sa liaison puis demande l’accès au microphone dans le navigateur ; maintenir **TALK** transmet aux destinataires choisis. **Source du micro** permet de choisir un casque, un micro USB ou le micro intégré si le périphérique par défaut est occupé par le pilote audio.
+
+Le master du PC démarre à 0 % pour parler sans ouvrir son monitoring ; le remonter permet d’écouter avec des écouteurs. MATRIX reste accessible pour autoriser les micros des musiciens. Le profil PC et ses réglages sont conservés au redémarrage, y compris une permission révoquée dans MATRIX. Télécharger le bridge mis à jour et relancer ce lanceur est nécessaire ; mettre à jour seulement la page Web ne modifie pas le serveur installé.

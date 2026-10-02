@@ -140,9 +140,10 @@ Voir [AUDIT.md](AUDIT.md) pour les constats et les limites de validation.
 
 1. Fermer le bridge précédent. Actualiser le dépôt complet, extraire, puis lancer `start-low-latency-windows.cmd`. Le programme tourne tant que sa fenêtre reste ouverte, même si la console navigateur est fermée.
 2. Brancher la MR18 en USB et utiliser son ASIO officiel. Le lanceur demande 128 échantillons à 48 kHz ; le pilote peut refuser cette valeur, ce qui est signalé dans la console. Ne pas changer le buffer avec des écoutes actives.
-3. Scanner le QR sécurisé avec un téléphone sur le même LAN, brancher une sortie filaire et toucher ÉCOUTER. Le QR suggère Low-Latency ; le choix Stable reste accessible.
-4. Commencer avec le buffer de réception PCM de 10 ms. Passer à 20 ou 40 ms en cas de sous-alimentation ; essayer 5 ms seulement après un essai régulier. Le choix du buffer ne modifie pas la latence de la sortie matérielle.
-5. Pour comparer les moteurs, changer le choix dans Paramètres. La liaison redémarre et le micro doit être réactivé. Le mix, les assignations et la protection de la console restent appliqués par le serveur. Les clients PCM et Opus peuvent écouter simultanément.
+3. Le lanceur ouvre directement **Régisseur · PC serveur** dans LIVE. Pour parler depuis ce PC : choisir la **Source du micro**, toucher **ACTIVER MON MICRO**, autoriser le micro dans le navigateur, puis maintenir **TALK**. Aucun code session à saisir ; la liaison du PC se prépare avec le bouton micro. Le master démarre à 0 % pour parler sans ouvrir le monitoring du PC ; le remonter pour écouter avec des écouteurs.
+4. Toucher **CONNECTER LES MUSICIENS · QR**, scanner le QR sécurisé avec un téléphone sur le même LAN, brancher une sortie filaire et toucher ÉCOUTER. Le QR suggère Low-Latency ; le choix Stable reste accessible. **AUTORISER LEURS MICROS** ouvre MATRIX pour le talkback des musiciens.
+5. Commencer avec le buffer de réception PCM de 10 ms. Passer à 20 ou 40 ms en cas de sous-alimentation ; essayer 5 ms seulement après un essai régulier. Le choix du buffer ne modifie pas la latence de la sortie matérielle.
+6. Pour comparer les moteurs, changer le choix dans Paramètres. La liaison redémarre et le micro doit être réactivé. Le mix, les assignations et la protection de la console restent appliqués par le serveur. Les clients PCM et Opus peuvent écouter simultanément.
 
 ### Transport et diagnostics
 
@@ -157,3 +158,7 @@ Le PCM consomme 1,536 Mbit/s par utilisateur hors protocole, contre un Opus conf
 ### Vérifications v0.9.6
 
 Le banc Python vérifie le protocole binaire, l’absence de canal Opus pour un auditeur PCM, la restitution des entrées autorisées et la limitation de congestion. Le banc Node exécute le lecteur AudioWorklet pour vérifier la stéréo, les séquences qui bouclent, l’ordre des paquets, les pertes, le retard et la restitution à 44,1/48/96 kHz. Le banc navigateur doit vérifier le signal réellement décodé en Chromium/WebKit, les mixes, MATRIX, le talkback, la coexistence et le changement de moteur. Le signal est créé uniquement dans les bancs ; aucune source artificielle ne remplace la MR18 dans le produit.
+
+### Vérifications v0.9.7
+
+Le banc Python vérifie que seul le PC local avec la clé console peut obtenir le profil Régisseur PC ; son jeton audio ne donne aucun droit MATRIX et n’apparaît pas dans le QR. Le banc navigateur ouvre le parcours du lanceur sans saisie de code, active le micro avec un seul bouton, vérifie la réception PCM/Opus et les destinations, puis exerce MATRIX, le mix personnel, le changement de source micro, l’arrêt, la reprise, le refus de permission navigateur et la réutilisation du profil. Ces essais utilisent un périphérique micro de test ; ils ne valident pas le pilote ASIO et le micro de votre PC physique.

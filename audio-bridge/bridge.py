@@ -40,7 +40,7 @@ CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioErro
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.6-low-latency"
+VERSION = "0.9.7-regisseur"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -286,7 +286,7 @@ class Bridge:
             self.last_mobile = {"address": req.remote, "seenAt": time.time(), "stage": "Page accessible"}
         return json_response({"service": "fosa-audio-bridge", "protocol": 1, "version": VERSION, "runId": self.run_id})
 
-    async def local_console(self, req):
+    def require_local_console(self, req):
         # Loopback alone is insufficient: reject DNS rebinding and cross-origin browser requests.
         origin = req.headers.get("Origin")
         if (not req.remote or not ipaddress.ip_address(req.remote).is_loopback or
@@ -294,7 +294,28 @@ class Bridge:
             req.headers.get("X-FOSA-Console") != "1" or
             (origin and origin != f"{req.scheme}://{req.host}")):
             raise web.HTTPForbidden(text="Console automatique disponible uniquement sur le PC serveur")
+
+    async def local_console(self, req):
+        self.require_local_console(req)
         return json_response({"token": self.saved["admin"]})
+
+    async def regisseur(self, req):
+        self.profile(req, admin=True)
+        self.require_local_console(req)
+        pid = self.saved.get('regisseurProfile')
+        p = self.saved['profiles'].get(pid)
+        if p is None:
+            pid = str(uuid.uuid4())
+            mix = default_mix()
+            mix['master'] = 0  # The operator can speak without opening the PC monitor.
+            p = {'id': pid, 'token': secrets.token_urlsafe(32), 'name': 'Régisseur PC',
+                 'role': 'Régisseur', 'mix': mix, 'mixVersion': 0, 'allowed': [True]*CHANNELS,
+                 'locked': False, 'talkAllowed': True, 'talkListen': True, 'localRegisseur': True}
+            self.saved['profiles'][pid] = p
+            self.saved['regisseurProfile'] = pid
+            self.persist()
+        return json_response({'token': p['token'], 'profile': self.public_profile(p),
+                              'session': self.saved['session']})
 
     def join_url(self, role="Personnalisé", address=None, mode=None):
         invitation = {"session": self.saved["session"], "code": self.saved["joinCode"], "role": role}
@@ -726,7 +747,12 @@ class Bridge:
                     self.network["selfCheck"] = "passed"
                     self.network["selfCheckNote"] = "HTTP vérifié depuis ce PC. Accès depuis un téléphone en attente."
                     if getattr(self.args, "open_browser", False):
-                        await asyncio.to_thread(webbrowser.open, f"http://127.0.0.1:{port}/network.html?console=1")
+                        url = f"http://127.0.0.1:{port}/network.html?console=1"
+                        if getattr(self.args, 'regisseur', False):
+                            url += '&regisseur=1&view=live'
+                            if getattr(self.args, 'low_latency', False):
+                                url += '&engine=pcm'
+                        await asyncio.to_thread(webbrowser.open, url)
                     return
                 except (OSError, ValueError, asyncio.TimeoutError):
                     await asyncio.sleep(.25)
@@ -776,7 +802,8 @@ class Bridge:
                         web.post('/api/mix', self.mix), web.post('/api/matrix', self.matrix),
                         web.post('/api/offer', self.offer), web.post('/api/control', self.control),
                         web.post('/api/disconnect', self.disconnect), web.get('/api/qr', self.qr)])
-        app.add_routes([web.post('/api/local-console', self.local_console), web.get('/api/network', self.network_status)])
+        app.add_routes([web.post('/api/local-console', self.local_console),
+                        web.post('/api/regisseur', self.regisseur), web.get('/api/network', self.network_status)])
         # Never expose state.json, admin keys, source tree or arbitrary filesystem paths.
         files = {'/': 'network.html', '/network.html': 'network.html', '/network.js': 'network.js',
                  '/network.css': 'network.css', '/fosa-icon.svg': 'fosa-icon.svg',
@@ -805,6 +832,7 @@ if __name__ == '__main__':
     parser.add_argument('--musicians', action='store_true', help='Automatic LAN listen-only startup, QR and Windows firewall')
     parser.add_argument('--secure-mobile', action='store_true', help='Trusted HTTPS musician page and encrypted connection setup for mobile talkback')
     parser.add_argument('--low-latency', action='store_true', help='PCM 5 ms suggested in secure QR; initial capture buffer 128')
+    parser.add_argument('--regisseur', action='store_true', help='Open the local operator LIVE view with private PC audio profile')
     parser.add_argument('--open-browser', action='store_true', help='Open the local console only after the server is ready')
     parser.add_argument('--data-dir', default=str(Path.home()/'.fosa-audio'))
     args = parser.parse_args()
