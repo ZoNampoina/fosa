@@ -35,11 +35,12 @@ from qrcode.image.svg import SvgPathImage
 from mixer import CHANNELS, RATE, FRAME, clean_mix, default_mix, render_mix
 from lan import discover, configure_firewall
 from secure_relay import RelayIdentity, SecureRelay
+from low_latency import PcmSender, SAMPLES as PCM_FRAME
 CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioError,) if sd else ())
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.5-talkback"
+VERSION = "0.9.6-low-latency"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -108,8 +109,11 @@ class Bridge:
         self.stream = None
         self.device = None
         self.wanted = None
-        self.buffer = 256
+        self.buffer = 128 if getattr(args, 'low_latency', False) else 256
         self.raw = deque(maxlen=32)
+        self.capture_loop = None
+        self.capture_event = None
+        self.capture_wake_pending = False
         self.last_capture = 0
         self.last_retry = 0
         self.peaks = np.zeros(CHANNELS)
@@ -178,6 +182,19 @@ class Bridge:
             self.capture_drops += 1
         self.raw.append((time.monotonic(), data.copy()))
         self.last_capture = time.monotonic()
+        # Wake once per callback block rather than relying on Windows timer resolution.
+        loop = self.capture_loop
+        if loop is not None and not loop.is_closed() and not self.capture_wake_pending:
+            self.capture_wake_pending = True
+            try:
+                loop.call_soon_threadsafe(self.wake_capture)
+            except RuntimeError:
+                self.capture_wake_pending = False
+
+    def wake_capture(self):
+        self.capture_wake_pending = False
+        if self.capture_event:
+            self.capture_event.set()
 
     def open_device(self, device_id, buffer):
         if sd is None:
@@ -233,7 +250,9 @@ class Bridge:
         return {k: p.get(k) for k in ("id", "name", "role", "mix", "mixVersion", "allowed", "locked", "talkAllowed", "talkListen")} | {
             "connected": bool(c and c["pc"].connectionState == "connected"),
             "device": c.get("device", "—") if c else "—", "network": c.get("metrics", {}).get("network", "Inconnu") if c else "—",
-            "metrics": c.get("metrics", {}) if c else {}, "droppedFrames": c["track"].dropped if c else 0}
+            "metrics": c.get("metrics", {}) if c else {}, "droppedFrames": c["track"].dropped if c else 0,
+            "monitoringEngine": c.get('engine', 'opus') if c else None,
+            "pcm": c['pcm'].status() if c and c.get('engine') == 'pcm' else None}
 
     def status(self):
         connected = self.connected()
@@ -247,7 +266,9 @@ class Bridge:
                 "mapping": [{"input": i+1, "channel": i+1, "verified": False} for i in range(CHANNELS)],
                 "captureLatencyMs": round(self.stream.latency * 1000, 2) if connected else None,
                 "audioLatencyMs": None, "latencyMethod": "Non mesurée : test physique nécessaire",
-                "opusFrameMs": 20, "cpu": self.cpu, "ramMB": round(self.process.memory_info().rss / 1048576, 1) if self.process else None,
+                "opusFrameMs": 20,
+                "monitoringEngines": {"opus": {"packetMs": 20}, "pcm": {"packetMs": 5, "payloadMbps": 1.536, "experimental": True}},
+                "cpu": self.cpu, "ramMB": round(self.process.memory_info().rss / 1048576, 1) if self.process else None,
                 "xruns": self.xruns, "captureDrops": self.capture_drops,
                 "error": self.error, "clients": sum(c["pc"].connectionState == "connected" for c in self.clients.values()),
                 "channels": [dict(c, rmsDb=db(self.rms[i]) if connected else None,
@@ -277,6 +298,8 @@ class Bridge:
 
     def join_url(self, role="Personnalisé", address=None, mode=None):
         invitation = {"session": self.saved["session"], "code": self.saved["joinCode"], "role": role}
+        if getattr(self.args, 'low_latency', False) and mode != 'lan':
+            invitation['engine'] = 'pcm'
         if self.secure and mode != "lan":
             return self.secure.config["clientUrl"] + "?musician=1#" + urlencode(invitation | self.secure.descriptor())
         base = self.args.public_url.rstrip("/")
@@ -455,16 +478,27 @@ class Bridge:
         if p is None:
             raise web.HTTPForbidden(text="Rejoignez avec un profil musicien pour écouter")
         b = await req.json()
+        engine = b.get('monitoringEngine', 'opus')
+        if engine not in ('opus', 'pcm'):
+            raise ValueError('Moteur monitoring inconnu')
         await self.close_client(p["id"])
         pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         track = StereoTrack()
         client = {"pc": pc, "track": track, "tasks": [], "previous": None, "limiter": 1., "metrics": {},
                   "voice": deque(maxlen=3), "voiceAt": 0, "talkUntil": 0,
                   "dataChannel": None, "controlSeq": -1,
+                  "engine": engine, "pcm": PcmSender(), "opusPending": [],
+                  "voiceCurrent": None, "voiceOffset": 0,
                   "created": time.monotonic(), "target": "all", "device": str(b.get("device", "Navigateur"))[:100]}
         self.clients[p["id"]] = client
         @pc.on("datachannel")
         def data_channel(channel):
+            if channel.label == 'fosa-pcm-v1' and engine == 'pcm' and client['pcm'].channel is None:
+                if channel.ordered or channel.maxRetransmits != 0:
+                    channel.close()
+                    return
+                client['pcm'].channel = channel
+                return
             if channel.label != "fosa-control" or client["dataChannel"] is not None:
                 channel.close()
                 return
@@ -503,13 +537,15 @@ class Bridge:
                 await self.close_client(p["id"])
         try:
             await pc.setRemoteDescription(RTCSessionDescription(sdp=b["sdp"], type="offer"))
-            pc.addTrack(track)
+            if engine == 'opus':
+                pc.addTrack(track)
             opus = [c for c in RTCRtpSender.getCapabilities("audio").codecs if c.mimeType.lower() == "audio/opus"]
             for t in pc.getTransceivers():
                 if t.kind == "audio":
                     t.setCodecPreferences(opus)
             await pc.setLocalDescription(await pc.createAnswer())
-            return json_response({"type": "answer", "sdp": pc.localDescription.sdp})
+            return json_response({"type": "answer", "sdp": pc.localDescription.sdp} |
+                                 ({"monitoringEngine": engine} if engine == 'pcm' else {}))
         except Exception:
             await self.close_client(p["id"])
             raise
@@ -544,7 +580,7 @@ class Bridge:
             c["target"] = str(b.get("target", "all"))[:80]
             m = b.get("metrics")
             if isinstance(m, dict):
-                c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency", "playback", "packets")}
+                c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency", "playback", "packets", "pcm")}
         return json_response({"ok": True, "talkAllowed": p["talkAllowed"],
                               "talkActive": bool(c and c["talkUntil"] > time.monotonic())})
 
@@ -563,34 +599,53 @@ class Bridge:
         return web.Response(body=out.getvalue(), content_type="image/svg+xml")
 
     async def pump(self):
+        self.capture_loop = asyncio.get_running_loop()
+        self.capture_event = asyncio.Event()
         pending = np.empty((0, CHANNELS), dtype=np.float32)
+        pending_at = None
         next_silence = time.monotonic()
         while True:
+            self.capture_event.clear()
             blocks = []
             now = time.monotonic()
             while self.raw:
                 ts, block = self.raw.popleft()
-                if now-ts > .08:  # never accumulate stale audio on a stalled server
+                budget = .02 if any(c.get('engine') == 'pcm' for c in self.clients.values()) else .08
+                if now-ts > budget or (pending_at is not None and now-pending_at > budget):
                     self.capture_drops += 1
                     pending = np.empty((0, CHANNELS), dtype=np.float32)
+                    pending_at = None
+                    for client in self.clients.values():
+                        client.get('opusPending', []).clear()
                     continue
+                if pending_at is None:
+                    pending_at = ts
                 pending = np.concatenate((pending, block))
-                while len(pending) >= FRAME:
-                    blocks.append(pending[:FRAME])
-                    pending = pending[FRAME:]
+                while len(pending) >= PCM_FRAME:
+                    blocks.append((pending_at, pending[:PCM_FRAME]))
+                    pending = pending[PCM_FRAME:]
+                    pending_at = ts if len(pending) else None
             if not self.connected() and now >= next_silence:
                 # Transport keepalive silence, explicitly reported DISCONNECTED in telemetry.
-                blocks = [np.zeros((FRAME, CHANNELS), dtype=np.float32)]
+                blocks = [(now, np.zeros((PCM_FRAME, CHANNELS), dtype=np.float32))]
                 pending = np.empty((0, CHANNELS), dtype=np.float32)
-                next_silence = now+.02
-            for block in blocks:
-                self.peaks = np.maximum(np.max(np.abs(block), axis=0), self.peaks*.98)
+                pending_at = None
+                next_silence = now+.005
+            for captured_at, block in blocks:
+                self.peaks = np.maximum(np.max(np.abs(block), axis=0), self.peaks*.995)
                 self.rms = np.sqrt(np.mean(block*block, axis=0))
                 self.clip_at[np.max(np.abs(block), axis=0) >= .999] = now
                 voices = {}
                 for pid, c in list(self.clients.items()):
-                    if c["voice"]:
-                        voice = c["voice"].popleft()
+                    if c.get('voiceCurrent') is None and c['voice']:
+                        c['voiceCurrent'] = c['voice'].popleft()
+                        c['voiceOffset'] = 0
+                    if c.get('voiceCurrent') is not None:
+                        offset = c['voiceOffset']
+                        voice = c['voiceCurrent'][offset:offset+PCM_FRAME]
+                        c['voiceOffset'] += PCM_FRAME
+                        if c['voiceOffset'] >= FRAME:
+                            c['voiceCurrent'] = None
                         if self.saved["profiles"][pid]["talkAllowed"] and c["talkUntil"] > now and now-c["voiceAt"] < .15:
                             voices[pid] = voice
                 for pid, c in list(self.clients.items()):
@@ -603,9 +658,19 @@ class Bridge:
                     voice = sum(heard) if heard else None
                     mixed, c["previous"], peak = render_mix(block, p["mix"], p["allowed"], voice, c["previous"])
                     wanted = min(1., .95/max(peak, .001))
-                    c["limiter"] = min(wanted, c["limiter"]+.002)
-                    c["track"].feed(np.clip(mixed*c["limiter"], -.95, .95))
-            await asyncio.sleep(.003)
+                    c["limiter"] = min(wanted, c["limiter"]+.0005)
+                    output = np.clip(mixed*c["limiter"], -.95, .95)
+                    if c.get('engine') == 'pcm':
+                        c['pcm'].feed(output, (time.monotonic()-captured_at)*1000)
+                    else:
+                        c.setdefault('opusPending', []).append(output)
+                        if len(c['opusPending']) == FRAME//PCM_FRAME:
+                            c['track'].feed(np.concatenate(c['opusPending']))
+                            c['opusPending'].clear()
+            try:
+                await asyncio.wait_for(self.capture_event.wait(), .005)
+            except asyncio.TimeoutError:
+                pass  # Source-absent keepalive; valid capture wakes the loop directly.
 
     async def monitor(self):
         while True:
@@ -715,6 +780,8 @@ class Bridge:
         # Never expose state.json, admin keys, source tree or arbitrary filesystem paths.
         files = {'/': 'network.html', '/network.html': 'network.html', '/network.js': 'network.js',
                  '/network.css': 'network.css', '/fosa-icon.svg': 'fosa-icon.svg',
+                 '/low-latency-worklet.js': 'low-latency-worklet.js',
+                 '/low-latency.js': 'low-latency.js',
                  '/network-relay.js': 'network-relay.js', '/network-relay-config.json': 'network-relay-config.json'}
         async def static(req):
             name = files.get(req.path)
@@ -737,6 +804,7 @@ if __name__ == '__main__':
     parser.add_argument('--insecure-lan', action='store_true', help='HTTP LAN mode for easy listen-only mobile tests')
     parser.add_argument('--musicians', action='store_true', help='Automatic LAN listen-only startup, QR and Windows firewall')
     parser.add_argument('--secure-mobile', action='store_true', help='Trusted HTTPS musician page and encrypted connection setup for mobile talkback')
+    parser.add_argument('--low-latency', action='store_true', help='PCM 5 ms suggested in secure QR; initial capture buffer 128')
     parser.add_argument('--open-browser', action='store_true', help='Open the local console only after the server is ready')
     parser.add_argument('--data-dir', default=str(Path.home()/'.fosa-audio'))
     args = parser.parse_args()

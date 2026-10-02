@@ -17,10 +17,10 @@ async function fixture() {
   });
   return {child,...config};
 }
-async function musician(browser, url, name, role, device={}) {
+async function musician(browser, url, name, role, device={},engine='opus') {
   const context=await browser.newContext({...device,permissions:['microphone'],serviceWorkers:'block'});
-  const allowed=new Set(['network.html','network.js','network.css','network-relay.js','network-relay-config.json','fosa-icon.svg']);
-  await context.route('https://zonampoina.github.io/fosa/musicians/v095/*',route=>{
+  const allowed=new Set(['network.html','network.js','network.css','network-relay.js','network-relay-config.json','fosa-icon.svg','low-latency.js','low-latency-worklet.js']);
+  await context.route('https://zonampoina.github.io/fosa/musicians/**/*',route=>{
     const name=basename(new URL(route.request().url()).pathname);
     if(!allowed.has(name))return route.abort();
     const contentType=name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':name.endsWith('.svg')?'image/svg+xml':'text/html';
@@ -44,6 +44,7 @@ async function musician(browser, url, name, role, device={}) {
   assert.equal(await page.evaluate(()=>isSecureContext),true);
   assert.equal(await page.evaluate(()=>typeof navigator.mediaDevices.getUserMedia),'function');
   await page.locator('#profileName').fill(name);await page.locator('#profileRole').selectOption(role);
+  await page.locator('#welcomeCard .monitoring-engine').selectOption(engine);
   const start=Date.now();await page.locator('#joinListen').click();
   try {
     await page.waitForFunction(()=>document.querySelector('#streamStatus').textContent==='AUDIO EN LECTURE'&&window.testChannels.some(c=>c.readyState==='open'),null,{timeout:30000});
@@ -109,6 +110,22 @@ async function main() {
     assert.equal(await a.page.locator('#liveTalk').isDisabled(),true);
     console.log('PASS: Chromium real getUserMedia with browser test input, all/person/role routing, release, revocation, no self-echo, cloud-independent live control.');
 
+    // A real capture permission result can arrive after the user stops listening.
+    await admin('matrix',{id:a.credentials.id,talkAllowed:true});
+    await a.page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);
+    await a.page.evaluate(()=>{
+      const acquire=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia=async(...args)=>{const stream=await acquire(...args);await new Promise(resolve=>window.finishTestCapture=resolve);return stream};
+    });
+    await a.page.locator('#liveEnableMic').click();
+    await a.page.waitForFunction(()=>typeof window.finishTestCapture==='function');
+    await a.page.locator('.net-nav [data-view="mix"]').click();
+    await a.page.locator('#stopAudio').click();
+    await a.page.evaluate(()=>window.finishTestCapture());
+    await a.page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended'));
+    assert.equal(await a.page.locator('#talk').isDisabled(),true);
+    console.log('PASS: late microphone permission cannot reopen a stopped session.');
+
     safari=await webkit.launch();
     const ios=await musician(safari,f.url,'TEST WebKit iPhone microphone','Chant',devices['iPhone 13']);
     const iosState=(await admin('state')).users.find(p=>p.id===ios.credentials.id);
@@ -128,4 +145,5 @@ async function main() {
     console.log('PASS: HTTPS QR + real encrypted relay + direct talkback in Chromium/WebKit; physical devices and MR18 untested.');
   } finally { await chrome?.close();await safari?.close();f.child.kill('SIGTERM'); }
 }
-main().catch(error=>{console.error(error);process.exitCode=1});
+module.exports={fixture,musician,signal,press,release};
+if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1});

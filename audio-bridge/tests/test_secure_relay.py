@@ -6,6 +6,7 @@ import secrets
 import sys
 import time
 import unittest
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -71,3 +72,35 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls, 0)
         result = json.loads(self.response_key.decrypt(unb64(replies[0]["iv"]), unb64(replies[0]["data"]), self.aad))
         self.assertEqual(result["data"]["code"], "CLOCK_SKEW")
+
+    async def test_future_dated_replay_stays_cached_for_the_entire_acceptance_window(self):
+        replies = []
+        async def send(value): replies.append(value)
+        now = time.time()
+        envelope = self.request(sentAt=(now+119)*1000)
+        await self.relay.respond(envelope, send)
+        with patch('secure_relay.time.time', return_value=now+220):
+            await self.relay.respond(envelope, send)
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(len(replies), 2)
+
+    async def test_closed_socket_does_not_repeat_dispatch(self):
+        replies = []
+        async def closed(value): raise ConnectionError('test socket closed')
+        async def send(value): replies.append(value)
+        envelope = self.request()
+        await self.relay.respond(envelope, closed)
+        await self.relay.respond(envelope, send)
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(len(replies), 1)
+
+    async def test_dispatch_failure_returns_a_generic_error(self):
+        async def broken(message): raise RuntimeError('private server detail')
+        self.relay.dispatch = broken
+        replies = []
+        async def send(value): replies.append(value)
+        with self.assertLogs('secure_relay', level='WARNING'):
+            await self.relay.respond(self.request(), send)
+        result = json.loads(self.response_key.decrypt(unb64(replies[0]['iv']), unb64(replies[0]['data']), self.aad))
+        self.assertEqual(result['status'], 500)
+        self.assertNotIn('private server detail', json.dumps(result))

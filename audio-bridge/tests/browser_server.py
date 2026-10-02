@@ -30,14 +30,19 @@ async def main():
                                       close=lambda:None)
         async def produce():
             phase=0
+            start=asyncio.get_running_loop().time()
             while True:
-                data=np.zeros((960,18),np.float32)
-                t=(np.arange(960)+phase)/48000
+                data=np.zeros((240,18),np.float32)
+                t=(np.arange(240)+phase)/48000
                 data[:,0]=np.sin(2*np.pi*440*t)*.1
                 data[:,2]=np.sin(2*np.pi*880*t)*.1
-                bridge.capture(data,960,None,None)
-                phase+=960
-                await asyncio.sleep(.02)
+                bridge.capture(data,240,None,None)
+                phase+=240
+                # Absolute pacing avoids accumulating Python sleep overhead as clock drift.
+                target=start+phase/48000
+                await asyncio.sleep(max(0,target-asyncio.get_running_loop().time()))
+                if asyncio.get_running_loop().time()-target>.03:
+                    start=asyncio.get_running_loop().time()-phase/48000
         source=asyncio.create_task(produce())
         app=bridge.app()
         # This fixture must never enumerate/open hardware from a CI runner.

@@ -23,8 +23,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare versioned secure musician client
         run: |
-          mkdir -p musicians/v095
-          cp network.html network.js network.css network-relay.js network-relay-config.json fosa-icon.svg musicians/v095/
+          mkdir -p musicians/v095 musicians/v096
+          git fetch --no-tags --depth=1 origin 987b0727540efd79ac5bc1e77a2f072efb642f40
+          for asset in network.html network.js network.css network-relay.js network-relay-config.json fosa-icon.svg; do
+            git show 987b0727540efd79ac5bc1e77a2f072efb642f40:"$asset" > "musicians/v095/$asset"
+          done
+          cp network.html network.js network.css network-relay.js network-relay-config.json low-latency.js low-latency-worklet.js fosa-icon.svg musicians/v096/
       - uses: actions/configure-pages@v5
         with:
           enablement: true

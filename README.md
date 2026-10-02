@@ -69,3 +69,22 @@ Nouveau module intégré : AUDIO, MON MIX, LIVE AUDIO, MATRIX, APPAREILS et DIAG
 Lancement `audio-bridge/start-mobile-windows.cmd` : détection du réseau physique, vérification du port et du pare-feu Windows, puis console locale avec QR et code session. Le musicien scanne, saisit son nom et touche ÉCOUTER ; le monitoring HTTP ne demande ni micro ni certificat. La capture Windows exige ASIO et 18 entrées à 48 kHz. La réception des paquets et la lecture navigateur sont distinguées de la connexion du driver.
 
 [Guide de démarrage](audio-bridge/README.md) · [Audit et validation](audio-bridge/AUDIT.md). Le test MR18/Windows et les essais sur téléphones physiques restent indispensables ; le talkback mobile sécurisé et un installateur Windows autonome sont des étapes suivantes.
+
+## v0.9.5 — FOSA Web / Control / Talkback
+
+Le lanceur mobile affiche maintenant un QR HTTPS de confiance pour rejoindre le PC, écouter et activer le micro sans certificat à installer. Le régisseur autorise **Micro** dans MATRIX ; le musicien touche **ACTIVER MON MICRO**, choisit Tous, un profil ou une personne, puis maintient **TALK**. La parole est coupée au relâchement et lors d’une révocation de permission.
+
+Internet sert à charger la page et établir la session chiffrée ; l’audio et les commandes en session passent directement sur le LAN. Un QR distinct conserve l’écoute LAN sans Internet. Le bridge téléchargé sur le PC doit être mis à jour, puis son nouveau QR scanné.
+
+Cette livraison concerne le contrôle et le talkback. Le monitoring actuel utilise toujours le moteur Python / Opus à trames de 20 ms : **il n’est pas le futur moteur FOSA Low-Latency**, et sa latence physique reste à mesurer. L’évolution du moteur de monitoring sera traitée séparément, sans annoncer de délai non mesuré.
+
+[Activer le talkback](audio-bridge/README.md#activer-le-talkback-mobile) · [Tests et limites](audio-bridge/AUDIT.md).
+
+
+## FOSA Low-Latency · v0.9.6
+
+Un second moteur de monitoring PCM stéréo 48 kHz, 16 bits, transmet des blocs de 5 ms directement sur le LAN. Choisir **FOSA Low-Latency · PCM** avant ÉCOUTER ou dans Paramètres ; le mode Stable Opus reste disponible par utilisateur. Le nouveau lanceur `audio-bridge/start-low-latency-windows.cmd` propose le PCM dans le QR sécurisé et demande un buffer de capture ASIO de 128 échantillons.
+
+La restitution utilise AudioWorklet, avec un buffer ciblé de 5/10/20/40 ms et des compteurs de sous-alimentation, de paquets tardifs et de données abandonnées. L’audio PCM nécessite le QR HTTPS sur mobile et consomme environ 1,54 Mbit/s par auditeur, hors en-têtes réseau. Le talkback et les permissions MATRIX sont communs aux deux moteurs.
+
+**5 ms est la durée d’un bloc, pas une latence audio mesurée.** Cette version utilise encore le navigateur et le transport WebRTC SCTP/DTLS ; elle ne constitue pas une application audio native UDP/AAudio/CoreAudio. Le système et la sortie audio ajoutent leurs propres buffers. Les essais logiciels ne valident pas une latence garantie avec la MR18 ou des téléphones physiques.

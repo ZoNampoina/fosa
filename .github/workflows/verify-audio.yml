@@ -24,6 +24,9 @@ jobs:
       - run: python -m unittest discover -s audio-bridge/tests -v
       - run: node --check network.js
       - run: node --check network-relay.js
+      - run: node --check low-latency.js
+      - run: node --check low-latency-worklet.js
+      - run: node audio-bridge/tests/pcm_worklet.cjs
       - run: git diff --check
       - name: Parse Windows firewall helper
         if: runner.os == 'Windows'
@@ -59,6 +62,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
           FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
         run: node audio-bridge/tests/secure_browser_flow.cjs
+      - name: Verify PCM playback and coexistence with Opus
+        env:
+          NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
+          FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
+        run: node audio-bridge/tests/low_latency_browser_flow.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

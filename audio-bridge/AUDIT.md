@@ -44,3 +44,24 @@ Un test Windows crée une vraie `.venv` et vérifie que les règles pare-feu cib
 - API WebRTC W3C : https://w3c.github.io/webrtc-pc/
 - Sélecteurs ASIO sounddevice : https://python-sounddevice.readthedocs.io/en/0.5.5/api/platform-specific-settings.html
 - Cmdlets réseau Windows : https://learn.microsoft.com/en-us/powershell/module/netadapter/get-netadapter
+
+## Complément du 2 octobre 2026 — Web / Control / Talkback v0.9.5
+
+Base : `2d8cba5`, version mobile v0.9.4. Le blocage confirmé par le code est l’accès au microphone sur une origine HTTP LAN mobile. Autoriser un micro dans MATRIX ne peut pas lever cette restriction du navigateur. Installer un certificat auto-signé ne constitue pas un parcours simple et fiable sur Android/iOS.
+
+La page musicien est désormais chargée depuis GitHub Pages en HTTPS de confiance. La signalisation initiale réutilise le Realtime Supabase existant avec chiffrement applicatif P-256 / HKDF-SHA256 / AES-GCM. Le QR contient l’identité publique du bridge et l’identifiant du démarrage, jamais sa clé privée ni la clé régisseur. Les échanges ont des clés distinctes pour les demandes et les réponses ; les requêtes anciennes sont rejetées et les retransmissions de join/offer restent idempotentes pendant toute leur fenêtre de validité.
+
+Après négociation, le navigateur ferme son relais et utilise un canal de données WebRTC fiable, lié au profil authentifié, pour le mix, les permissions observées, les vumètres et TALK. Les routes d’administration ne sont pas disponibles par ces transports musiciens. Le micro utilise le WebRTC audio direct déjà présent, avec permission serveur, destinations Tous/profil/personne, baisse du mix et coupure au relâchement. Un numéro de commande empêche un ancien appui TALK d’annuler un relâchement plus récent.
+
+Le premier banc sécurisé, commit `987b072`, a passé les tests Windows/Linux et les tests Chromium/WebKit. La signalisation utilise le véritable service Supabase ; les fichiers HTTPS proviennent du commit en test. La capture utilise l’API réelle getUserMedia avec le périphérique de test du navigateur. Le banc vérifie l’émission reçue, les trois modes de destination, l’absence de retour sur l’émetteur, le relâchement, la révocation de permission et le contrôle en session avec nouvelles connexions au relais bloquées. L’écoute HTTP, les mixes indépendants, la restauration et la reconnexion ont également passé leurs tests.
+
+La publication est conditionnée aux vérifications du commit final. La page HTTPS possède un chemin versionné pour éviter de réutiliser les anciens fichiers du service worker. Le PC doit recevoir les nouveaux fichiers du bridge ; une simple mise à jour de la page publique ne remplace pas le serveur déjà téléchargé.
+
+Limites inchangées : pas d’essai sur MR18 ou téléphones physiques depuis ce banc, pas de validation de concert ni de mesure physique bout-en-bout. Internet est nécessaire pour charger et rétablir une session HTTPS ; le QR LAN permet une écoute hors Internet. Le moteur de monitoring Python / Opus 20 ms est conservé pour les essais. **FOSA Low-Latency n’est pas livré dans cette étape.**
+
+
+## v0.9.6 · moteur PCM
+
+Ajout d’une voie PCM stéréo 5 ms, par utilisateur, distincte du monitoring Opus. Capture ASIO, authentification et MATRIX restent communes. Le callback réveille le traitement par bloc plutôt que par minuterie Windows. Les files serveur et client sont bornées, le stockage audio du lecteur est alloué à l’avance et la cadence de lecture corrige une dérive modérée des horloges. Les lectures HTTP Opus restent prises en charge.
+
+Limites : Python, JavaScript, MessagePort, SCTP et l’OS ne sont pas des couches audio temps réel garanties ; une application native serait nécessaire pour contrôler plus précisément la restitution. Aucun test actuel ne prouve une latence physique ni une capacité de groupe sur matériel. Le talkback reste Opus 20 ms. Le débit PCM et les interruptions doivent être testés sur le réseau des musiciens avant un concert.

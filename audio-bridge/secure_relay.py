@@ -5,9 +5,10 @@ bridge switch to their authenticated WebRTC data channel after negotiation.
 """
 import asyncio
 import base64
-import contextlib
 import hashlib
 import json
+import logging
+import math
 import secrets
 import time
 from urllib.parse import urlencode
@@ -82,25 +83,36 @@ class SecureRelay:
     def descriptor(self):
         return {"relay": self.identity.id, "key": b64(self.identity.public), "epoch": self.epoch}
 
+    async def dispatch_safely(self, request):
+        try:
+            return await self.dispatch(request)
+        except Exception as error:
+            logging.getLogger(__name__).warning("Musician relay request failed (%s)", type(error).__name__)
+            return {"status": 500, "data": {"error": "Le bridge n’a pas pu traiter cette commande. Réessaie."}}
+
     async def respond(self, envelope, send):
         try:
             request, peer, key, aad = self.identity.open(envelope, self.epoch)
             now = time.time()
-            if abs(now * 1000 - float(request.get("sentAt", 0))) > 120000:
+            sent_at = float(request.get("sentAt", 0))
+            if not math.isfinite(sent_at) or abs(now * 1000 - sent_at) > 120000:
                 result = {"status": 409, "data": {"error": "Synchronisation de l’horloge nécessaire", "code": "CLOCK_SKEW"}}
             else:
                 # A retransmitted join/offer must never create a second profile or connection.
-                self.requests = {k: v for k, v in self.requests.items() if now-v[0] < 180 or not v[1].done()}
+                # +/-120 seconds permits a future-dated request for up to 240 seconds.
+                self.requests = {k: v for k, v in self.requests.items() if now-v[0] < 300 or not v[1].done()}
                 cache_key = (peer, request["id"])
                 if cache_key not in self.requests:
                     if len(self.requests) >= 4096:
                         return
-                    self.requests[cache_key] = (now, asyncio.create_task(self.dispatch(request)))
+                    self.requests[cache_key] = (now, asyncio.create_task(self.dispatch_safely(request)))
                 result = await self.requests[cache_key][1]
             response = dict(result, id=request["id"], serverTime=int(time.time()*1000))
             await send(self.identity.seal(response, peer, key, aad, self.epoch))
         except (ValueError, KeyError, TypeError, InvalidTag):
             return  # Malformed or unauthenticated ciphertext is never dispatched.
+        except (OSError, RuntimeError):
+            return  # A closed relay socket can be retried; the response stays cached.
 
     async def run(self):
         retry = 0

@@ -163,6 +163,52 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(m['channels'][2]['rmsDb'],-12,delta=.2)
         self.assertAlmostEqual(m['channels'][2]['peakDb'],-12,delta=.2)
 
+    async def test_pcm_transport_uses_authorized_personal_mix_without_opus(self):
+        patcher=patch('aioice.ice.get_host_addresses',return_value=['127.0.0.1'])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        pc=RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        pc.addTransceiver('audio',direction='sendrecv')
+        channel=pc.createDataChannel('fosa-pcm-v1',ordered=False,maxRetransmits=0)
+        queue=asyncio.Queue()
+        @channel.on('message')
+        def received(data):queue.put_nowait(data)
+        try:
+            await pc.setLocalDescription(await pc.createOffer())
+            r=await self.client.post('/api/offer',headers=self.auth,json={
+                'sdp':pc.localDescription.sdp,'monitoringEngine':'pcm'})
+            answer=await r.json()
+            self.assertEqual(r.status,200,answer)
+            self.assertEqual(answer.pop('monitoringEngine'),'pcm')
+            await pc.setRemoteDescription(RTCSessionDescription(**answer))
+            for _ in range(200):
+                if channel.readyState=='open':break
+                await asyncio.sleep(.01)
+            self.assertEqual(channel.readyState,'open')
+            self.assertTrue(all(t.direction=='recvonly' for t in self.bridge.clients[self.pid]['pc'].getTransceivers()))
+            p=self.bridge.saved['profiles'][self.pid]
+            p['mix']['master']=1
+            for c in p['mix']['channels']:c['gain']=0
+            p['mix']['channels'][2].update(gain=1,pan=1)
+            self.bridge.connected=lambda:True
+            self.bridge.clients[self.pid]['previous']=None
+            data=np.zeros((240,18),np.float32);data[:,2]=.2
+            self.bridge.capture(data,240,None,None)
+            for _ in range(20):
+                payload=await asyncio.wait_for(queue.get(),2)
+                samples=np.frombuffer(payload[24:],'<i2').reshape(240,2)
+                if samples.any():break  # Already in-flight source-absent keepalive packets.
+            self.assertLess(np.max(np.abs(samples[:,0])),2)
+            self.assertGreater(np.mean(samples[:,1]),6000)
+            p['allowed'][2]=False
+            self.bridge.clients[self.pid]['previous']=None
+            self.bridge.capture(data,240,None,None)
+            payload=await asyncio.wait_for(queue.get(),2)
+            self.assertFalse(np.frombuffer(payload[24:],'<i2').any())
+            self.assertEqual(self.bridge.clients[self.pid]['track'].queue.qsize(),0)
+        finally:
+            await pc.close()
+
     async def test_webrtc_stereo_transport_with_test_input(self):
         # Limit this transport test to localhost, independent of LAN adapter permissions.
         patcher=patch('aioice.ice.get_host_addresses',return_value=['127.0.0.1'])
