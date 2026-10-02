@@ -57,8 +57,11 @@ async function main(){
     await signal(page,false);
 
     // Personal mix editing must keep admin credentials and affect only the PC profile.
+    // Wait for the externally muted channels to reach this UI before editing its master.
+    await page.waitForFunction(()=>[...document.querySelectorAll('[data-gain]')].every(el=>el.value==='0'));
     await page.locator('#liveMaster').focus();await page.locator('#liveMaster').press('End');
     const s=await stateWhen(s=>s.users.find(p=>p.id===operator.id)?.mix.master===1);
+    assert.ok(s.users.find(p=>p.id===operator.id).mix.channels.every(c=>c.gain===0));
     assert.equal(s.users.find(p=>p.id===pcm.credentials.id).mix.master,.5);
     await press(page);await signal(pcm.page,true);await signal(opus.page,true);await signal(page,false);
     await page.screenshot({path:output+'/regisseur-pc-talk.png',fullPage:true});
