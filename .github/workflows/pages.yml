@@ -21,6 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare versioned secure musician client
+        run: |
+          mkdir -p musicians/v095
+          cp network.html network.js network.css network-relay.js network-relay-config.json fosa-icon.svg musicians/v095/
       - uses: actions/configure-pages@v5
         with:
           enablement: true

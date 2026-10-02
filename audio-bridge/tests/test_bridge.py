@@ -48,6 +48,41 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         response=await self.client.get('/api/state',headers=self.admin|{'Origin':'https://evil.example'})
         self.assertEqual(response.status,403)
 
+    async def test_secure_rpc_never_exposes_console_or_another_profile(self):
+        for path in ['local-console', 'network', 'matrix', 'configure', '../state.json']:
+            result = await self.bridge.musician_rpc({'path':path, 'token':self.joined['token'], 'body':{}})
+            self.assertEqual(result['status'],403)
+        result = await self.bridge.musician_rpc({'path':'state', 'token':self.bridge.saved['admin']})
+        self.assertEqual(result['status'],403)
+        result = await self.bridge.musician_rpc({'path':'state', 'token':self.joined['token']})
+        self.assertEqual(result['status'],200)
+        self.assertNotIn('users',result['data'])
+        self.assertEqual(result['data']['profile']['id'],self.pid)
+        result = await self.bridge.musician_rpc({'path':'control', 'token':self.joined['token'], 'body':None})
+        self.assertEqual(result['status'],400)
+
+    async def test_release_and_revocation_cannot_be_reopened_by_old_control(self):
+        from bridge import StereoTrack
+        from collections import deque
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        client={'pc':pc, 'track':StereoTrack(), 'tasks':[], 'voice':deque(), 'voiceAt':0,
+                'talkUntil':0, 'target':'all', 'created':time.monotonic(), 'controlSeq':-1,
+                'previous':None, 'limiter':1., 'dataChannel':object()}
+        self.bridge.clients[self.pid]=client
+        p=self.bridge.saved['profiles'][self.pid]
+        p['talkAllowed']=True
+        async def control(sequence,talk):
+            return await self.bridge.musician_rpc({'path':'control','body':{'sequence':sequence,'talk':talk}},client,self.pid)
+        self.assertTrue((await control(1,True))['data']['talkActive'])
+        self.assertFalse((await control(2,False))['data']['talkActive'])
+        self.assertFalse((await control(1,True))['data']['talkActive'])
+        late=await self.bridge.musician_rpc({'path':'control','token':p['token'],'body':{'talk':True}})
+        self.assertEqual(late['status'],409)
+        await control(3,True)
+        await self.client.post('/api/matrix',headers=self.admin,json={'id':self.pid,'talkAllowed':False})
+        self.assertEqual(client['talkUntil'],0)
+        self.assertFalse((await control(4,True))['data']['talkActive'])
+
     async def test_mix_lock_persistence_and_transient_solo(self):
         mix=self.joined['profile']['mix']
         mix['channels'][0]['gain']=.85

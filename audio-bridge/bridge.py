@@ -34,11 +34,12 @@ import qrcode
 from qrcode.image.svg import SvgPathImage
 from mixer import CHANNELS, RATE, FRAME, clean_mix, default_mix, render_mix
 from lan import discover, configure_firewall
+from secure_relay import RelayIdentity, SecureRelay
 CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioError,) if sd else ())
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.4-musicians"
+VERSION = "0.9.5-talkback"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.
@@ -54,6 +55,15 @@ def _json_dumps(data):
 
 def json_response(data, **kwargs):
     return web.json_response(data, dumps=_json_dumps, **kwargs)
+
+class MusicianRequest:
+    """Internal RPC adapter; never constructed from a public HTTP header."""
+    remote = None
+    def __init__(self, token, body):
+        self.headers = {"Authorization": "Bearer " + token}
+        self.body = body
+    async def json(self):
+        return self.body
 
 class StereoTrack(MediaStreamTrack):
     kind = "audio"
@@ -122,6 +132,12 @@ class Bridge:
         except psutil.Error:
             self.process = None
         self.cpu = None
+        self.secure = None
+        if getattr(args, "secure_mobile", False):
+            identity = RelayIdentity(self.saved.get("relayPrivateKey"))
+            self.saved["relayPrivateKey"] = identity.export_private()
+            config = json.loads((ROOT / "network-relay-config.json").read_text(encoding="utf-8"))
+            self.secure = SecureRelay(identity, self.run_id, config, self.musician_rpc)
         self.persist()
 
     def persist(self):
@@ -259,7 +275,10 @@ class Bridge:
             raise web.HTTPForbidden(text="Console automatique disponible uniquement sur le PC serveur")
         return json_response({"token": self.saved["admin"]})
 
-    def join_url(self, role="Personnalisé", address=None):
+    def join_url(self, role="Personnalisé", address=None, mode=None):
+        invitation = {"session": self.saved["session"], "code": self.saved["joinCode"], "role": role}
+        if self.secure and mode != "lan":
+            return self.secure.config["clientUrl"] + "?musician=1#" + urlencode(invitation | self.secure.descriptor())
         base = self.args.public_url.rstrip("/")
         if address:
             if address not in [a["address"] for a in self.network["adapters"]]:
@@ -267,13 +286,48 @@ class Bridge:
             u = urlsplit(base)
             base = f"{u.scheme}://{address}:{u.port or self.args.port}"
         # The session code belongs to the shareable QR, never the private console key.
-        return base + "/network.html?musician=1#" + urlencode({"session": self.saved["session"],
-            "code": self.saved["joinCode"], "role": role})
+        return base + "/network.html?musician=1#" + urlencode(invitation)
 
     async def network_status(self, req):
         self.profile(req, admin=True)
         return json_response(self.network | {"joinCode": self.saved["joinCode"],
-            "joinUrl": self.join_url(), "lastClient": self.last_mobile})
+            "joinUrl": self.join_url(), "lanJoinUrl": self.join_url(mode="lan"), "lastClient": self.last_mobile,
+            "secure": {"enabled": bool(self.secure), **(self.secure.status if self.secure else {})}})
+
+    async def musician_rpc(self, message, client=None, pid=None):
+        """The cloud and data channel expose musician actions only, never the console."""
+        routes = {"health": self.health, "join": self.join, "state": self.get_state,
+                  "meters": self.get_meters, "mix": self.mix, "offer": self.offer,
+                  "control": self.control, "disconnect": self.disconnect}
+        try:
+            if not isinstance(message, dict) or message.get("path") not in routes:
+                raise web.HTTPForbidden(text="Commande indisponible sur le lien musicien")
+            path = message["path"]
+            if path in ("join", "mix", "offer", "control", "disconnect") and not isinstance(message.get("body"), dict):
+                raise ValueError("Commande musicien invalide")
+            if client is not None:
+                if self.clients.get(pid) is not client or path in ("join", "offer"):
+                    raise web.HTTPForbidden(text="Liaison musicien invalide")
+                token = self.saved["profiles"][pid]["token"]
+            else:
+                token = message.get("token", "")
+            if not isinstance(token, str) or hmac.compare_digest(token, self.saved["admin"]):
+                raise web.HTTPForbidden(text="La console régisseur reste sur le PC serveur")
+            request = MusicianRequest(token, message.get("body"))
+            if path == "control":
+                p = self.profile(request)
+                current = self.clients.get(p["id"])
+                # Never reopen TALK from a delayed cloud message after a direct release.
+                if client is None and current and current.get("dataChannel"):
+                    raise web.HTTPConflict(text="TALK utilise la liaison locale directe")
+            response = await routes[path](request)
+            if client is None and path == "join" and response.status == 200:
+                self.last_mobile = {"address": "Page HTTPS", "seenAt": time.time(), "stage": "Profil rejoint"}
+            return {"status": response.status, "data": json.loads(response.text)}
+        except web.HTTPException as error:
+            return {"status": error.status, "data": {"error": error.text}}
+        except CAPTURE_ERRORS as error:
+            return {"status": 400, "data": {"error": str(error)}}
 
     async def join(self, req):
         b = await req.json()
@@ -305,6 +359,9 @@ class Bridge:
         result["admin"] = p is None
         if p is None:
             result["users"] = [self.public_profile(v) for v in self.saved["profiles"].values()]
+        result["talkTargets"] = [{"id": v["id"], "name": v["name"], "role": v["role"]}
+                                 for v in self.saved["profiles"].values() if v["talkListen"] and
+                                 v["id"] != (p or {}).get("id") and v["id"] in self.clients]
         return json_response(result)
 
     async def list_devices(self, req):
@@ -376,6 +433,8 @@ class Bridge:
         for key in ("locked", "talkAllowed", "talkListen"):
             if key in b:
                 p[key] = b[key] is True
+        if not p["talkAllowed"] and p["id"] in self.clients:
+            self.clients[p["id"]]["talkUntil"] = 0
         if "allowed" in b:
             if not isinstance(b["allowed"], list) or len(b["allowed"]) != CHANNELS:
                 raise ValueError("18 assignations requises")
@@ -401,8 +460,38 @@ class Bridge:
         track = StereoTrack()
         client = {"pc": pc, "track": track, "tasks": [], "previous": None, "limiter": 1., "metrics": {},
                   "voice": deque(maxlen=3), "voiceAt": 0, "talkUntil": 0,
+                  "dataChannel": None, "controlSeq": -1,
                   "created": time.monotonic(), "target": "all", "device": str(b.get("device", "Navigateur"))[:100]}
         self.clients[p["id"]] = client
+        @pc.on("datachannel")
+        def data_channel(channel):
+            if channel.label != "fosa-control" or client["dataChannel"] is not None:
+                channel.close()
+                return
+            client["dataChannel"] = channel
+            queue = asyncio.Queue(maxsize=32)
+            async def respond():
+                while True:
+                    message = await queue.get()
+                    result = await self.musician_rpc(message, client, p["id"])
+                    if channel.readyState == "open":
+                        channel.send(_json_dumps(dict(result, id=message.get("id"))))
+            task = asyncio.create_task(respond())
+            client["tasks"].append(task)
+            @channel.on("message")
+            def receive(data):
+                if not isinstance(data, str) or len(data) > 96*1024 or queue.full():
+                    return
+                try:
+                    message = json.loads(data)
+                    if isinstance(message, dict) and isinstance(message.get("id"), str):
+                        queue.put_nowait(message)
+                except ValueError:
+                    return
+            @channel.on("close")
+            def closed():
+                client["talkUntil"] = 0
+                task.cancel()
         @pc.on("track")
         def incoming(t):
             if t.kind == "audio":
@@ -446,12 +535,18 @@ class Bridge:
         self.solo_until[p["id"]] = time.monotonic()+1.5
         c = self.clients.get(p["id"])
         if c:
+            sequence = b.get("sequence")
+            if sequence is not None and (not isinstance(sequence, int) or sequence <= c.get("controlSeq", -1)):
+                return json_response({"ok": True, "talkAllowed": p["talkAllowed"], "talkActive": c["talkUntil"] > time.monotonic()})
+            if sequence is not None:
+                c["controlSeq"] = sequence
             c["talkUntil"] = time.monotonic()+1.5 if p["talkAllowed"] and b.get("talk") is True else 0
             c["target"] = str(b.get("target", "all"))[:80]
             m = b.get("metrics")
             if isinstance(m, dict):
                 c["metrics"] = {k: m.get(k) for k in ("rtt", "jitter", "loss", "network", "audioLatency", "playback", "packets")}
-        return json_response({"ok": True, "talkAllowed": p["talkAllowed"]})
+        return json_response({"ok": True, "talkAllowed": p["talkAllowed"],
+                              "talkActive": bool(c and c["talkUntil"] > time.monotonic())})
 
     async def disconnect(self, req):
         p = self.profile(req)
@@ -462,7 +557,7 @@ class Bridge:
     async def qr(self, req):
         self.profile(req, admin=True)
         role = req.query.get("role", "Personnalisé")[:40]
-        url = self.join_url(role, req.query.get("address"))
+        url = self.join_url(role, req.query.get("address"), req.query.get("mode"))
         out = io.BytesIO()
         qrcode.make(url, image_factory=SvgPathImage).save(out)
         return web.Response(body=out.getvalue(), content_type="image/svg+xml")
@@ -547,6 +642,8 @@ class Bridge:
 
     async def start(self, app):
         self.tasks = [asyncio.create_task(self.pump()), asyncio.create_task(self.monitor())]
+        if self.secure:
+            self.tasks.append(asyncio.create_task(self.secure.run()))
         if getattr(self.args, "musicians", False) or getattr(self.args, "open_browser", False):
             self.tasks.append(asyncio.create_task(self.ready()))
 
@@ -571,6 +668,8 @@ class Bridge:
         self.network["selfCheck"] = "failed"
         self.network["selfCheckNote"] = "Le PC n’arrive pas à joindre le bridge sur l’adresse LAN sélectionnée."
     async def stop(self, app):
+        if self.secure:
+            await self.secure.stop()
         for t in self.tasks:
             t.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -615,7 +714,8 @@ class Bridge:
         app.add_routes([web.post('/api/local-console', self.local_console), web.get('/api/network', self.network_status)])
         # Never expose state.json, admin keys, source tree or arbitrary filesystem paths.
         files = {'/': 'network.html', '/network.html': 'network.html', '/network.js': 'network.js',
-                 '/network.css': 'network.css', '/fosa-icon.svg': 'fosa-icon.svg'}
+                 '/network.css': 'network.css', '/fosa-icon.svg': 'fosa-icon.svg',
+                 '/network-relay.js': 'network-relay.js', '/network-relay-config.json': 'network-relay-config.json'}
         async def static(req):
             name = files.get(req.path)
             if not name:
@@ -636,6 +736,7 @@ if __name__ == '__main__':
     parser.add_argument('--allow-origin', action='append', default=[])
     parser.add_argument('--insecure-lan', action='store_true', help='HTTP LAN mode for easy listen-only mobile tests')
     parser.add_argument('--musicians', action='store_true', help='Automatic LAN listen-only startup, QR and Windows firewall')
+    parser.add_argument('--secure-mobile', action='store_true', help='Trusted HTTPS musician page and encrypted connection setup for mobile talkback')
     parser.add_argument('--open-browser', action='store_true', help='Open the local console only after the server is ready')
     parser.add_argument('--data-dir', default=str(Path.home()/'.fosa-audio'))
     args = parser.parse_args()

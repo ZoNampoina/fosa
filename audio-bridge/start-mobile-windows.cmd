@@ -5,7 +5,7 @@ title FOSA - Demarrer pour les musiciens
 call setup-windows.cmd
 if errorlevel 1 goto error
 set SD_ENABLE_ASIO=1
-".venv\Scripts\python.exe" -u bridge.py --musicians --open-browser
+".venv\Scripts\python.exe" -u bridge.py --musicians --secure-mobile --open-browser
 pause
 exit /b
 :error

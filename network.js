@@ -23,17 +23,21 @@ const invite=new URLSearchParams(location.hash.slice(1));
 const inviteValue=k=>invite.get(k)||query.get(k);
 let outputContext=null,outputSource=null,outputGain=null,playbackReady=false,receivedPackets=0,lastPacketsAt=0;
 let serverNetwork=null,setupQrUrl=null,joining=false;
+let relayClient=null,direct=null,controlSequence=0,talkConfirmed=false,micPending=false,micRequest=0;
 const musician=query.has('musician');
 const embedded=window.parent!==window;
 const notice=t=>$('#notice').textContent=t;
 function contextKey(){return 'fosa_network_mix:'+server+':'+(profile?.id||'draft')}
 function token(){return admin||credentials[server]?.token||''}
 function setServer(value){
+ if(relayClient){server='relay:'+relayClient.descriptor.relay;put('fosa_network_server',server);$('#serverUrl').value=server;return}
  const u=new URL(value);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw Error('Adresse HTTP(S) invalide');
  const next=u.origin;if(server!==next){stopAudio();state=null;profile=null;admin=''}server=next;put('fosa_network_server',server);$('#serverUrl').value=server;
 }
 async function api(path,{body,auth=true,timeout=6000}={}){
  if(!server)throw Error('Renseigne l’adresse du PC serveur.');
+ if(direct?.ready&&['health','state','meters','mix','control'].includes(path))return direct.request(path,body,timeout);
+ if(relayClient){if(['control','meters'].includes(path))throw Error('Liaison locale directe indisponible');return relayClient.request(path,body,auth?token():'',Math.max(timeout,12000))}
  const headers={};if(auth)headers.Authorization='Bearer '+token();if(body!==undefined)headers['Content-Type']='application/json';
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
  try{const r=await fetch(server+'/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:controller.signal});
@@ -56,11 +60,11 @@ function paintStatus(){
  $('#captureSummary').textContent=state?.connected?`${state.device?.name} · ${state.device?.driver} · ${state.sampleRate} Hz · ${state.buffer} échantillons · ${state.inputs} entrées`:(state?.error||'NON CONNECTÉ · aucune entrée détectée');
  $('#scanInterfaces').disabled=!admin;$('#startCapture').disabled=!admin;$('#interfaceSelect').disabled=!admin;
  $$('#master,#liveMaster,#muteAll,#liveMute,#ducking,#applyPreset,#restoreMix,#resetMix').forEach(el=>el.disabled=profile?.locked===true);$('#mixScope').textContent=profile?`${profile.name} · ${profile.role}${profile.locked?' · VERROUILLÉ':''}`:'Réglages locaux';
- $('#liveTalkNote').textContent=profile?.talkAllowed?'Micro LAN '+(micEnabled?'actif':'à activer dans TALKBACK'):'Autorisation talkback requise dans MATRIX.';
  const micAvailable=!!navigator.mediaDevices?.getUserMedia;
- $('#enableMic').textContent=micAvailable?(micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO'):'MICRO · HTTPS REQUIS';
- $('#enableMic').disabled=!micAvailable;$$('.talk').forEach(b=>b.disabled=!micAvailable||!profile?.talkAllowed);
- if(!micAvailable)$('#liveTalkNote').textContent='Écoute seule sur ce lien. Le micro talkback exige une connexion sécurisée.';
+ const micNote=!micAvailable?'Écoute seule : scanne le QR « Écoute + talkback » du PC.':!profile?.talkAllowed?'Le régisseur doit autoriser ton micro dans MATRIX.':!direct?.ready?'Touche ÉCOUTER pour établir la liaison locale.':micPending?'Autorise le microphone dans la demande du navigateur.':!micEnabled?'Touche ACTIVER MON MICRO, puis maintiens TALK.':talking?(talkConfirmed?'PAROLE TRANSMISE · '+$('#talkTarget').selectedOptions[0]?.textContent:'Ouverture du talkback…'):'Micro prêt · maintiens TALK pour parler.';
+ $$('#liveTalkNote,#talkNote').forEach(el=>el.textContent=micNote);
+ $$('#enableMic,#liveEnableMic').forEach(b=>{b.textContent=!micAvailable?'MICRO · LIEN SÉCURISÉ REQUIS':micPending?'AUTORISATION EN COURS…':micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO';b.disabled=!micAvailable||!profile?.talkAllowed||(!direct?.ready&&!micEnabled)||micPending});
+ $$('.talk').forEach(b=>{b.disabled=!micAvailable||!profile?.talkAllowed||!micEnabled||!direct?.ready;b.classList.toggle('talking',talking&&talkConfirmed);b.textContent=talking?(talkConfirmed?'PAROLE TRANSMISE':'CONNEXION TALK…'):'MAINTENIR TALK POUR PARLER'});
  $('#mixNotice').textContent=changed?'Modifications locales en attente du serveur.':profile?'Mix enregistré sur cet appareil et sur le serveur LAN.':'Réglages locaux : rejoins le serveur pour les appliquer au son.';
 }
 function buildMixer(){
@@ -102,9 +106,9 @@ async function pollMeters(){
 async function refresh(){
  if(!token()||polling)return;polling=true;
  try{const revision=localRevision,dirtyAtStart=changed||sending;const next=await api('state');state=next;profile=next.profile;
-  if(profile){if(!dirtyAtStart&&!changed&&!sending&&revision===localRevision&&(profile.mixVersion||0)>=confirmedMixVersion&&JSON.stringify(profile.mix)!==JSON.stringify(mix)){mix=profile.mix;syncMix()}if(changed&&!profile.locked)await flush()}
+  if(profile){if(!profile.talkAllowed&&(micEnabled||micPending))await disableMic();if(!dirtyAtStart&&!changed&&!sending&&revision===localRevision&&(profile.mixVersion||0)>=confirmedMixVersion&&JSON.stringify(profile.mix)!==JSON.stringify(mix)){mix=profile.mix;syncMix()}if(changed&&!profile.locked)await flush()}
   paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(page==='devices')renderDevices();
-  if(profile?.locked){mix=profile.mix;changed=false;syncMix()}if(page==='matrix'&&document.activeElement?.closest('#matrix')==null)renderMatrix();if(page==='talkback')renderTalkTargets();
+  if(profile?.locked){mix=profile.mix;changed=false;syncMix()}if(page==='matrix'&&document.activeElement?.closest('#matrix')==null)renderMatrix();renderTalkTargets();
   if(admin)await updateSetup();
  }catch(e){state=null;paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(desired)notice('Serveur momentanément inaccessible. Le dernier mix est conservé.');}
  finally{polling=false}
@@ -115,7 +119,7 @@ async function detect(){
 }
 async function join(listen=false){
  if(joining)return;joining=true;if(listen)unlockOutput();$('#joinListen').disabled=true;
- try{setServer($('#serverUrl').value.trim()||server);admin='';const b=await api('join',{auth:false,body:{code:$('#joinCode').value.trim().toUpperCase(),session:inviteValue('session'),name:$('#profileName').value.trim()||'Musicien',role:$('#profileRole').value}});credentials[server]={token:b.token,id:b.profile.id};put('fosa_network_credentials',credentials);profile=b.profile;mix=normalize(b.profile.mix);changed=false;await refresh();syncMix();show('live');if(invite.has('code'))history.replaceState(null,'',location.pathname+location.search);notice('Profil rejoint.');if(listen)await startAudio()}
+ try{setServer($('#serverUrl').value.trim()||server);admin='';const b=await api('join',{auth:false,body:{code:$('#joinCode').value.trim().toUpperCase(),session:inviteValue('session'),name:$('#profileName').value.trim()||'Musicien',role:$('#profileRole').value}});credentials[server]={token:b.token,id:b.profile.id};put('fosa_network_credentials',credentials);profile=b.profile;mix=normalize(b.profile.mix);changed=false;await refresh();syncMix();show('live');if(invite.has('code')){const clean=new URLSearchParams(location.hash.slice(1));clean.delete('code');history.replaceState(null,'',location.pathname+location.search+(relayClient?'#'+clean.toString():''))}notice('Profil rejoint.');if(listen)await startAudio()}
  catch(e){notice('Connexion impossible : '+e.message)}finally{joining=false;$('#joinListen').disabled=false}
 }
 async function adminLogin(){try{setServer($('#serverUrl').value.trim()||server);admin=$('#adminKey').value.trim();const s=await api('state');if(!s.admin)throw Error('Clé régisseur incorrecte');stopAudio();state=s;profile=null;$('#adminKey').value='';paintStatus();await scanInterfaces();notice('Console régisseur ouverte. Les permissions sont vérifiées par le bridge.')}catch(e){admin='';notice(e.message)}}
@@ -127,7 +131,9 @@ async function startAudio(){
  if(typeof RTCPeerConnection!=='function'){notice('WebRTC absent de ce navigateur. Ouvre ce lien dans Chrome sur Android ou Safari sur iPhone.');return}
  desired=true;put('fosa_network_resume:'+server,true);connecting=true;const generation=++connectingGeneration;
  let next;
- try{pc?.close();previousStats=null;receivedPackets=0;lastPacketsAt=0;next=new RTCPeerConnection({iceServers:[]});pc=next;transceiver=next.addTransceiver('audio',{direction:navigator.mediaDevices?.getUserMedia?'sendrecv':'recvonly'});if(micEnabled&&mic)await transceiver.sender.replaceTrack(mic.getAudioTracks()[0]);
+ try{stopTalk();pc?.close();direct=null;previousStats=null;receivedPackets=0;lastPacketsAt=0;next=new RTCPeerConnection({iceServers:[]});pc=next;transceiver=next.addTransceiver('audio',{direction:navigator.mediaDevices?.getUserMedia?'sendrecv':'recvonly'});if(micEnabled&&mic)await transceiver.sender.replaceTrack(mic.getAudioTracks()[0]);
+ const channel=next.createDataChannel('fosa-control',{ordered:true});const rpc=new FosaRpcChannel(channel);
+ channel.onopen=()=>{if(pc!==next)return;direct=rpc;relayClient?.pause();sendControl();paintStatus()};channel.onclose=()=>{if(direct===rpc){direct=null;stopTalk();paintStatus()}};
  const opus=RTCRtpReceiver.getCapabilities?.('audio')?.codecs.filter(c=>c.mimeType.toLowerCase()==='audio/opus');if(opus?.length)transceiver.setCodecPreferences(opus);
  next.ontrack=e=>{if(pc!==next)return;attachOutput(e.streams[0]||new MediaStream([e.track]));applyJitter();};
  next.onconnectionstatechange=()=>{if(pc!==next)return;paintStatus();if(next.connectionState==='connected'){retry=0;notice(state?.connected?'Liaison établie. Réception du mix…':'Liaison prête, en attente de la MR18.')}if(['failed','disconnected'].includes(next.connectionState)){reconnectAt=Date.now()+Math.min(8000,1000*2**Math.min(retry++,3));notice('Audio interrompu. Reconnexion automatique ; si cela persiste, vérifie le Wi-Fi et le diagnostic du PC.')}};
@@ -137,7 +143,7 @@ async function startAudio(){
  if(generation!==connectingGeneration||!desired){next.close();return}await next.setRemoteDescription(answer);setupMediaSession();
  }catch(e){if(generation===connectingGeneration){notice('Audio non connecté : '+e.message+'. Si la page est accessible mais pas le son, le trafic UDP WebRTC peut être bloqué.');next?.close();pc=null;reconnectAt=Date.now()+4000}}finally{if(generation===connectingGeneration)connecting=false;paintStatus()}
 }
-function stopAudio(){desired=false;connectingGeneration++;connecting=false;put('fosa_network_resume:'+server,false);stopTalk();pc?.close();pc=null;transceiver=null;outputSource?.disconnect();outputSource=null;audio.srcObject=null;receivedPackets=0;playbackReady=false;telemetry={rtt:null,jitter:null,loss:null,buffer:null};mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;if(token())api('disconnect',{body:{}}).catch(()=>{});paintStatus()}
+function stopAudio(){desired=false;connectingGeneration++;connecting=false;put('fosa_network_resume:'+server,false);stopTalk();pc?.close();pc=null;direct=null;transceiver=null;outputSource?.disconnect();outputSource=null;audio.srcObject=null;receivedPackets=0;playbackReady=false;telemetry={rtt:null,jitter:null,loss:null,buffer:null};micRequest++;mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;micPending=false;if(token())api('disconnect',{body:{}}).catch(()=>{});paintStatus()}
 // Resume Web Audio in the user's original gesture, before joining/ICE/network awaits.
 // This receive-only path never opens a microphone and works on an HTTP LAN origin.
 function unlockOutput(){
@@ -153,13 +159,17 @@ function attachOutput(stream){
 }
 function applyJitter(){for(const r of pc?.getReceivers()||[])if('jitterBufferTarget'in r)try{r.jitterBufferTarget=Number($('#jitterTarget').value)}catch{}}
 async function enableMic(){
- if(micEnabled){stopTalk();mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;await transceiver?.sender.replaceTrack(null);paintStatus();return}
- if(!profile?.talkAllowed){notice('Le régisseur doit autoriser ton micro dans MATRIX.');return}if(!navigator.mediaDevices?.getUserMedia){notice('Micro indisponible : utilise une adresse HTTPS avec un certificat reconnu.');return}
- try{if(!desired)await startAudio();if(!transceiver)throw Error('Connecte l’audio d’abord');mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false,channelCount:1}});mic.getTracks().forEach(t=>t.enabled=false);await transceiver.sender.replaceTrack(mic.getAudioTracks()[0]);micEnabled=true;paintStatus();notice('Micro prêt. Maintiens TALK pour parler.')}catch(e){notice('Micro : '+e.message)}
+ if(micEnabled){await disableMic();return}if(micPending)return;
+ if(!profile?.talkAllowed){notice('Le régisseur doit autoriser ton micro dans MATRIX.');return}if(!navigator.mediaDevices?.getUserMedia){notice('Scanne le QR « Écoute + talkback » affiché par le PC.');return}
+ if(!direct?.ready||!transceiver){notice('Touche ÉCOUTER avant d’activer ton micro.');return}
+ const request=++micRequest,sender=transceiver.sender;micPending=true;paintStatus();let captured;
+ try{captured=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false,channelCount:1}});captured.getTracks().forEach(t=>t.enabled=false);if(request!==micRequest||!profile?.talkAllowed||!direct?.ready){captured.getTracks().forEach(t=>t.stop());return}await sender.replaceTrack(captured.getAudioTracks()[0]);mic=captured;micEnabled=true;mic.getAudioTracks()[0].onended=()=>{disableMic();notice('Micro interrompu par le système. Active-le à nouveau pour parler.')};notice('Micro prêt. Maintiens TALK pour parler.')}
+ catch(e){captured?.getTracks().forEach(t=>t.stop());notice(e.name==='NotAllowedError'?'Micro refusé. Autorise le microphone pour ce site dans le navigateur, puis réessaie.':e.name==='NotFoundError'?'Aucun microphone disponible sur cet appareil.':'Micro : '+e.message)}finally{micPending=false;paintStatus()}
 }
-function startTalk(e){if(!micEnabled||!profile?.talkAllowed){notice('Active d’abord le micro autorisé dans TALKBACK.');return}e?.preventDefault();e?.currentTarget?.setPointerCapture?.(e.pointerId);talking=true;mic?.getTracks().forEach(t=>t.enabled=true);$$('.talk').forEach(b=>b.classList.add('talking'));sendControl()}
-function stopTalk(){if(!talking)return;talking=false;mic?.getTracks().forEach(t=>t.enabled=false);$$('.talk').forEach(b=>b.classList.remove('talking'));sendControl()}
-function sendControl(){if(!desired||!profile||!state)return;api('control',{body:{talk:talking,target:$('#talkTarget').value,metrics:{...telemetry,network:networkType(),audioLatency:null,playback:playbackReady,packets:receivedPackets}},timeout:2000}).catch(()=>{})}
+async function disableMic(){micRequest++;stopTalk();mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;micPending=false;try{await transceiver?.sender.replaceTrack(null)}catch{}paintStatus()}
+function startTalk(e){if(!micEnabled||!profile?.talkAllowed||!direct?.ready){notice('Active d’abord ton micro après autorisation du régisseur.');return}e?.preventDefault();if(e?.pointerId!==undefined)e.currentTarget?.setPointerCapture?.(e.pointerId);talking=true;talkConfirmed=false;mic?.getTracks().forEach(t=>t.enabled=true);sendControl();paintStatus()}
+function stopTalk(){if(!talking)return;talking=false;talkConfirmed=false;mic?.getTracks().forEach(t=>t.enabled=false);sendControl();paintStatus()}
+function sendControl(){if(!desired||!profile||!state)return;const sequence=++controlSequence;api('control',{body:{sequence,talk:talking,target:$('#talkTarget').value,metrics:{...telemetry,network:networkType(),audioLatency:null,playback:playbackReady,packets:receivedPackets}},timeout:2000}).then(reply=>{if(sequence!==controlSequence)return;talkConfirmed=talking&&reply.talkActive===true;if(!reply.talkAllowed&&(micEnabled||micPending))disableMic();paintStatus()}).catch(()=>{if(talking){stopTalk();notice('TALK coupé : liaison locale interrompue.')}})}
 async function stats(){if(!pc||pc.connectionState!=='connected')return;try{const rows=await pc.getStats();let pair,rtp;rows.forEach(r=>{if(r.type==='transport'&&r.selectedCandidatePairId)pair=rows.get(r.selectedCandidatePairId);if(r.type==='inbound-rtp'&&r.kind==='audio')rtp=r});if(pair)telemetry.rtt=Number.isFinite(pair.currentRoundTripTime)?pair.currentRoundTripTime*1000:null;if(rtp){if((rtp.packetsReceived||0)>receivedPackets)lastPacketsAt=Date.now();receivedPackets=rtp.packetsReceived||0;telemetry.jitter=Number.isFinite(rtp.jitter)?rtp.jitter*1000:null;if(previousStats&&previousStats.id===rtp.id){const lost=Math.max(0,(rtp.packetsLost||0)-previousStats.lost),received=Math.max(0,(rtp.packetsReceived||0)-previousStats.received),n=(rtp.jitterBufferEmittedCount||0)-previousStats.emitted;telemetry.loss=lost+received>0?lost/(lost+received)*100:null;telemetry.buffer=n>0?((rtp.jitterBufferDelay||0)-previousStats.delay)/n*1000:null}previousStats={id:rtp.id,lost:rtp.packetsLost||0,received:rtp.packetsReceived||0,emitted:rtp.jitterBufferEmittedCount||0,delay:rtp.jitterBufferDelay||0}}paintStatus();if(page==='diagnostic')renderDiagnostic()}catch{}}
 function renderDiagnostic(){
  const s=state,d=s?.device;const metrics=[['MR18 / interface',s?.connected?'Connectée':'NON CONNECTÉE'],['Driver',d?.driver||'—'],['ASIO',d?.asio?'OUI':'NON / absent'],['Fréquence',s?.sampleRate?s.sampleRate+' Hz':'—'],['Buffer réel',s?.buffer?s.buffer+' éch.':'—'],['Entrées',s?.inputs??'—'],['Canaux avec signal',s?s.channels.filter(c=>c.signal).length:'—'],['CPU bridge',fmt(s?.cpu,' %')],['RAM bridge',fmt(s?.ramMB,' Mo')],['Réseau',networkType()],['RTT WebRTC',fmt(telemetry.rtt)],['Jitter',fmt(telemetry.jitter)],['Pertes / intervalle',fmt(telemetry.loss,' %')],['Buffer réception',fmt(telemetry.buffer)],['Latence driver',fmt(s?.captureLatencyMs)],['Paquet Opus',s?s.opusFrameMs+' ms':'—'],['XRUN / pertes capture',s?`${s.xruns} / ${s.captureDrops}`:'—'],['Qualité réseau',quality()],['Paquets audio reçus',receivedPackets],['Sortie navigateur',outputContext?.state|| (playbackReady?'Lecture active':'En attente')],['Latence audio bout-en-bout','NON MESURÉE']];$('#diagnostics').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');renderMapping();
@@ -180,7 +190,7 @@ async function testInput(){
  }catch(e){$('#mappingResult').textContent='Test interrompu : '+e.message}finally{$('#testInput').disabled=false}
 }
 async function sharedQr(box,role,address){
- const path='qr?role='+encodeURIComponent(role)+(address?'&address='+encodeURIComponent(address):'');
+ const path='qr?role='+encodeURIComponent(role)+'&mode='+$('#shareMode').value+(address?'&address='+encodeURIComponent(address):'');
  const r=await fetch(server+'/api/'+path,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('QR indisponible');
  const url=URL.createObjectURL(await r.blob());const old=box.dataset.objectUrl;if(old)URL.revokeObjectURL(old);box.dataset.objectUrl=url;
  box.innerHTML='<img alt="QR pour rejoindre la session FOSA">';box.querySelector('img').src=url;
@@ -191,9 +201,12 @@ async function updateSetup(){
  const adapters=serverNetwork.adapters||[],select=$('#lanAdapter');
  const previous=select.value;
  if(JSON.stringify(adapters)!==select.dataset.adapters){select.innerHTML=adapters.map(a=>`<option value="${esc(a.address)}">${esc(a.type||'LAN')} · ${esc(a.name)} · ${esc(a.address)}</option>`).join('');select.dataset.adapters=JSON.stringify(adapters);if(adapters.some(a=>a.address===previous))select.value=previous}
- $('#adapterLabel').hidden=adapters.length<2;
- const link=new URL(serverNetwork.joinUrl);if(select.value)link.hostname=select.value;
- $('#setupAddress').value=link.origin;$('#setupCode').textContent=serverNetwork.joinCode;
+ $('#shareMode').querySelector('[value="secure"]').disabled=!serverNetwork.secure?.enabled;
+ if(!serverNetwork.secure?.enabled)$('#shareMode').value='lan';
+ const secured=$('#shareMode').value==='secure';$('#adapterLabel').hidden=secured||adapters.length<2;
+ const link=new URL(secured?serverNetwork.joinUrl:serverNetwork.lanJoinUrl);if(!secured&&select.value)link.hostname=select.value;
+ $('#setupAddress').value=link.href;$('#setupCode').textContent=serverNetwork.joinCode;
+ $('#shareModeInfo').textContent=secured?'Écoute + talkback · Internet pour établir la session · micro autorisé dans MATRIX.':serverNetwork.secure?.enabled?'Écoute LAN sans Internet · micro indisponible sur téléphone avec ce QR.':'Écoute LAN · lance start-mobile-windows.cmd pour obtenir le QR sécurisé avec talkback.';
  const qrKey=link.href;
  if($('#setupQr').dataset.key!==qrKey){await sharedQr($('#setupQr'),'Personnalisé',select.value);$('#setupQr').dataset.key=qrKey}
  const users=state?.users||[],connected=users.filter(p=>p.connected);
@@ -205,6 +218,7 @@ async function updateSetup(){
   [serverNetwork.selfCheck==='passed','Serveur HTTP sur le PC',serverNetwork.selfCheckNote||'Non vérifié par ce mode de lancement'],
   [serverNetwork.firewall?.state==='configured','Pare-feu Windows',serverNetwork.firewall?.message||'Non vérifié'],
   [!!$('#setupQr').dataset.key,'QR de connexion','Code session inclus · clé régisseur exclue'],
+  ...secured?[[serverNetwork.secure?.state==='ready','Connexion HTTPS',serverNetwork.secure?.message||'En préparation']]:[],
   [!!serverNetwork.lastClient,'Accès depuis un autre appareil',serverNetwork.lastClient?serverNetwork.lastClient.stage+' · '+serverNetwork.lastClient.address:'En attente du premier scan'],
   [connected.length>0,'Liaison audio',connected.length?connected.length+' profil(s) relié(s) par WebRTC':'En attente de ÉCOUTER sur le téléphone'],
   [false,'Latence physique','Non mesurée · test dans DIAGNOSTIC']
@@ -214,7 +228,7 @@ async function updateSetup(){
  $('#networkHelp').textContent=serverNetwork.lastClient?'Le serveur a reçu une requête d’un autre appareil. Si le son manque, consulte DIAGNOSTIC : paquets reçus, lecture et source sont contrôlés séparément.':'Le contrôle HTTP depuis ce PC ne prouve pas l’accès depuis le téléphone. Si le QR ne s’ouvre pas : même Wi-Fi, réseau invité et isolation des appareils, VPN ou autorisation réseau local du navigateur sont à vérifier.';
  $('#welcomeCard').hidden=true;
 }
-function renderTalkTargets(){const el=$('#talkTarget'),selected=el.value;const roles=['Batteur','Bassiste','Guitariste','Clavier','Chant','Chef','Régisseur'];if(el.options.length===1){for(const role of roles){const o=document.createElement('option');o.value='role:'+role;o.textContent=role;el.appendChild(o)}}el.value=selected}
+function renderTalkTargets(){const selected=$('#talkTarget').value,targets=state?.talkTargets||[];const roles=[...new Set(targets.map(p=>p.role))];const options='<option value="all">Tous les auditeurs autorisés</option>'+roles.map(role=>`<option value="role:${esc(role)}">Profil · ${esc(role)}</option>`).join('')+targets.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.role)}</option>`).join('');for(const el of $$('#talkTarget,#liveTalkTarget')){if(el.innerHTML!==options)el.innerHTML=options;el.value=[...el.options].some(o=>o.value===selected)?selected:'all'}if($('#talkTarget').value!==selected)stopTalk()}
 function renderDevices(){const users=state?.users;if(!users){$('#devices').textContent='Console régisseur requise.';return}$('#devices').innerHTML=users.length?`<table><thead><tr>${['Utilisateur','Appareil','Mix','Talkback','Connexion','RTT','Latence audio'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${users.map(p=>`<tr><td>${esc(p.name)}</td><td title="${esc(p.device)}">${/Android/i.test(p.device)?'Android':/iPhone|iPad/i.test(p.device)?'iOS':p.connected?'PC / navigateur':'—'}</td><td>${esc(p.role)}</td><td>${p.talkAllowed?'Micro autorisé':'Écoute'}${p.talkListen?'':' OFF'}</td><td>${p.connected?esc(p.network):'Hors ligne'}</td><td>${fmt(p.metrics?.rtt)}</td><td>Non mesurée</td></tr>`).join('')}</tbody></table>`:'Aucun profil musicien. Rejoins le bridge sur un autre appareil.'}
 function renderMatrix(){const users=state?.users;if(!admin||!users){$('#matrix').textContent='';return}$('#matrixHint').textContent='Assignations et permissions appliquées par le serveur. Mute et niveaux sont propres à chaque musicien.';if(!users.length){$('#matrix').textContent='Aucun profil musicien connecté.';return}
  $('#matrix').innerHTML=`<table><thead><tr><th>Entrée</th>${users.map(p=>`<th>${esc(p.name)}<br><label><input type="checkbox" data-permission="locked" data-user="${p.id}" ${p.locked?'checked':''}>Verrouiller</label><label><input type="checkbox" data-permission="talkAllowed" data-user="${p.id}" ${p.talkAllowed?'checked':''}>Micro</label><label><input type="checkbox" data-permission="talkListen" data-user="${p.id}" ${p.talkListen?'checked':''}>Écoute TB</label><button data-copy="${p.id}">COPIER MON MIX</button></th>`).join('')}</tr></thead><tbody>${(state.channels||[]).map((c,i)=>`<tr><th>${String(i+1).padStart(2,'0')} · ${esc(c.name)}</th>${users.map(p=>`<td><div class="matrix-cell"><input type="checkbox" data-assign="${i}" data-user="${p.id}" ${p.allowed[i]?'checked':''} aria-label="Assigner ${esc(c.name)} à ${esc(p.name)}"><input type="range" min="0" max="100" value="${Math.round(p.mix.channels[i].gain*100)}" data-matrix-gain="${i}" data-user="${p.id}" aria-label="Niveau ${esc(c.name)} pour ${esc(p.name)}"><button data-matrix-mute="${i}" data-user="${p.id}" class="${p.mix.channels[i].mute?'active':''}">M</button></div></td>`).join('')}</tr>`).join('')}</tbody></table>`;
@@ -237,17 +251,19 @@ function bind(){
  $$('[data-solo]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);mix.channels[Number(b.dataset.solo)].solo=true;edit()};const release=()=>{if(mix.channels[Number(b.dataset.solo)].solo){mix.channels[Number(b.dataset.solo)].solo=false;edit()}};b.onpointerup=release;b.onpointercancel=release;b.onlostpointercapture=release;b.onkeydown=e=>{if(e.key===' '){e.preventDefault();mix.channels[Number(b.dataset.solo)].solo=true;edit()}};b.onkeyup=release;b.onblur=release});
  $('#matrix').onchange=async e=>{const t=e.target,p=state?.users?.find(p=>p.id===t.dataset.user);if(!p)return;try{if(t.dataset.permission)await api('matrix',{body:{id:p.id,[t.dataset.permission]:t.checked}});if(t.dataset.assign!==undefined){p.allowed[Number(t.dataset.assign)]=t.checked;await api('matrix',{body:{id:p.id,allowed:p.allowed}})}if(t.dataset.matrixGain!==undefined){p.mix.channels[Number(t.dataset.matrixGain)].gain=Number(t.value)/100;await api('mix',{body:{id:p.id,mix:p.mix}})}await refresh()}catch(err){notice(err.message)}};
  $('#detect').onclick=detect;$('#joinNetwork').onclick=()=>join(false);$('#joinListen').onclick=()=>join(true);$('#adminLogin').onclick=adminLogin;$('#scanInterfaces').onclick=scanInterfaces;
- $('#lanAdapter').onchange=()=>updateSetup().catch(e=>notice(e.message));$('#testInput').onclick=testInput;
+ $('#lanAdapter').onchange=()=>updateSetup().catch(e=>notice(e.message));$('#shareMode').onchange=()=>updateSetup().catch(e=>notice(e.message));$('#testInput').onclick=testInput;
  $('#startCapture').onclick=async()=>{try{const s=await api('configure',{body:{device:Number($('#interfaceSelect').value),buffer:Number($('#bufferSelect').value)},timeout:12000});state=s;notice('Interface ouverte. Attente des premiers échantillons…');await refresh()}catch(e){notice(e.message)}};
  $('#startAudio').onclick=startAudio;$('#stopAudio').onclick=stopAudio;$('#muteAll').onclick=()=>{if(profile?.locked)return;mix.muteAll=!mix.muteAll;edit()};
  $('#saveMix').onclick=()=>{put(contextKey()+':saved',normalize(mix));notice('Mix sauvegardé sur cet appareil.')};$('#restoreMix').onclick=()=>{const saved=get(contextKey()+':saved',null);if(!saved){notice('Aucun mix sauvegardé pour ce profil.');return}if(profile?.locked)return;mix=normalize(saved);edit();notice('Mix restauré.')};$('#resetMix').onclick=()=>{if(profile?.locked)return;mix=blank();edit()};$('#applyPreset').onclick=applyPreset;
- $('#ducking').onchange=()=>{if(profile?.locked)return;mix.ducking=Number($('#ducking').value);edit()};$('#enableMic').onclick=enableMic;
+ $('#ducking').onchange=()=>{if(profile?.locked)return;mix.ducking=Number($('#ducking').value);edit()};$('#enableMic').onclick=enableMic;$('#liveEnableMic').onclick=enableMic;
+ $$('#talkTarget,#liveTalkTarget').forEach(el=>el.onchange=()=>{stopTalk();$$('#talkTarget,#liveTalkTarget').forEach(other=>other.value=el.value)});
+ $$('.talk').forEach(b=>{b.onkeydown=e=>{if([' ','Enter'].includes(e.key)&&!e.repeat)startTalk(e)};b.onkeyup=e=>{if([' ','Enter'].includes(e.key)){e.preventDefault();stopTalk()}}});
  $$('.talk').forEach(b=>{b.onpointerdown=startTalk;b.onpointerup=stopTalk;b.onpointercancel=stopTalk;b.onlostpointercapture=stopTalk});addEventListener('blur',stopTalk);document.addEventListener('visibilitychange',()=>{if(document.hidden){stopTalk();if(mix.channels.some(c=>c.solo)){mix.channels.forEach(c=>c.solo=false);edit()}}else{if(wake)requestWake();refresh()}});
  $('#jitterTarget').onchange=applyJitter;$('#refreshOutputs').onclick=outputs;$('#output').onchange=async()=>{try{if(outputContext?.setSinkId)await outputContext.setSinkId($('#output').value);else if(!outputContext)await audio.setSinkId($('#output').value);else throw Error('Ce navigateur utilise la sortie système pour Web Audio');$('#outputInfo').textContent='Sortie sélectionnée : '+$('#output').selectedOptions[0].textContent}catch(e){notice('Sortie non modifiée : '+e.message)}};
  $('#wake').onclick=async()=>{if(wake){await wake.release();wake=null;$('#wake').classList.remove('active')}else requestWake()};
  $('#testLatency').onclick=async()=>{try{const start=performance.now();await api('health',{auth:false});$('#diagnosticNote').textContent=`Aller-retour HTTP : ${(performance.now()-start).toFixed(1)} ms. RTT WebRTC : ${fmt(telemetry.rtt)}. La latence audio bout-en-bout reste non mesurée : suis le test physique ci-dessous.`}catch(e){notice(e.message)}};
  $('#optimize').onclick=()=>{const stable=state?.xruns>0||telemetry.loss>1||telemetry.jitter>15;$('#jitterTarget').value=stable?'40':'20';applyJitter();$('#diagnosticNote').textContent=stable?'Cible réception portée à 40 ms. Après arrêt des écoutes, essaie un buffer ASIO 512 si des craquements persistent.':'Cible réception 20 ms. Garde le buffer ASIO 256 pour les premiers essais ; diminue-le seulement après vérification sans craquements.'};
- $('#makeQr').onclick=async()=>{if(!admin){notice('Console régisseur requise pour générer le QR local.');return}try{serverNetwork=await api('network');const url=new URL(serverNetwork.joinUrl),params=new URLSearchParams(url.hash.slice(1));params.set('role',$('#qrRole').value);url.hash=params.toString();const address=$('#lanAdapter').value;if(address)url.hostname=address;$('#joinLink').value=url.href;await sharedQr($('#qrBox'),$('#qrRole').value,address)}catch(e){notice(e.message)}};
+ $('#makeQr').onclick=async()=>{if(!admin){notice('Console régisseur requise pour générer le QR local.');return}try{serverNetwork=await api('network');const secured=$('#shareMode').value==='secure',url=new URL(secured?serverNetwork.joinUrl:serverNetwork.lanJoinUrl),params=new URLSearchParams(url.hash.slice(1));params.set('role',$('#qrRole').value);url.hash=params.toString();const address=$('#lanAdapter').value;if(!secured&&address)url.hostname=address;$('#joinLink').value=url.href;await sharedQr($('#qrBox'),$('#qrRole').value,address)}catch(e){notice(e.message)}};
  $('#copyLink').onclick=async()=>{try{if(!$('#joinLink').value)throw Error('Génère d’abord le lien.');await navigator.clipboard.writeText($('#joinLink').value);notice('Lien copié.')}catch(e){$('#joinLink').select();notice('Sélectionne et copie le lien. '+e.message)}};
  $('#forgetSession').onclick=()=>{stopAudio();delete credentials[server];put('fosa_network_credentials',credentials);admin='';profile=null;state=null;show('audio');paintStatus();notice('Profil déconnecté sur cet appareil.')};
  $('#backFosa').onclick=()=>window.parent.postMessage({type:'fosa-network-close'},location.origin);
@@ -260,8 +276,9 @@ async function boot(){
  document.body.classList.toggle('musician',musician);
  if(inviteValue('role')&&[...$('#profileRole').options].some(o=>o.value===inviteValue('role')))$('#profileRole').value=inviteValue('role');
  if(inviteValue('code'))$('#joinCode').value=inviteValue('code');
- // LAN page identifies its own server. Cloud app requires an explicit local URL.
- if(musician||query.has('console')||location.port==='8765'||['127.0.0.1','localhost'].includes(location.hostname)){server=location.origin;put('fosa_network_server',server)}
+ // The secure QR binds the bridge identity; no HTTPS page fetches a private HTTP URL.
+ if(inviteValue('relay')){try{relayClient=await FosaRelay.create({relay:inviteValue('relay'),key:inviteValue('key'),epoch:inviteValue('epoch')});setServer('')}catch(e){notice('Connexion sécurisée : '+e.message);return}}
+ else if(musician||query.has('console')||location.port==='8765'||['127.0.0.1','localhost'].includes(location.hostname)){server=location.origin;put('fosa_network_server',server)}
  $('#serverUrl').value=server;show(query.get('view')||'audio');paintStatus();renderDiagnostic();
  if(musician){$('#welcomeCard h1').textContent='Rejoindre FOSA';$('#serverAddressForm').hidden=true}
  try{await api('health',{auth:false,timeout:3000});if(query.has('console')&&['127.0.0.1','localhost'].includes(location.hostname)){
