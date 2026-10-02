@@ -54,6 +54,9 @@ def render_mix(samples, mix, allowed=None, talk_audio=None, previous=None):
     target = gains(mix, allowed, talk_audio is not None)
     out = samples @ target
     if previous is not None and not np.array_equal(previous, target):
+        if allowed is not None:
+            # A newly forbidden input must not survive in the smoothing ramp.
+            previous = previous * np.asarray(allowed, dtype=np.float32)[:, None]
         n = min(240, len(samples))
         ramp = np.linspace(0, 1, n, dtype=np.float32)[:, None]
         out[:n] = (samples[:n] @ previous) * (1 - ramp) + out[:n] * ramp

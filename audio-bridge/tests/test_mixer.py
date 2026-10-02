@@ -45,6 +45,13 @@ class MixerTests(unittest.TestCase):
         self.assertFalse(gains(one)[1:].any())
         self.assertTrue(gains(two)[1:].any())
 
+    def test_permission_revocation_does_not_leak_in_gain_ramp(self):
+        mix=default_mix()
+        samples=np.zeros((240,18),np.float32);samples[:,2]=.25
+        _,previous,_=render_mix(samples,mix)
+        allowed=[True]*18;allowed[2]=False
+        self.assertFalse(render_mix(samples,mix,allowed,previous=previous)[0].any())
+
     def test_ducking_and_mute_all(self):
         m = default_mix()
         music = np.full((960,18), .001, np.float32)

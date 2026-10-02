@@ -610,7 +610,7 @@ class Bridge:
             now = time.monotonic()
             while self.raw:
                 ts, block = self.raw.popleft()
-                budget = .02 if any(c.get('engine') == 'pcm' for c in self.clients.values()) else .08
+                budget = max(.02, self.buffer/RATE*1.5) if any(c.get('engine') == 'pcm' for c in self.clients.values()) else .08
                 if now-ts > budget or (pending_at is not None and now-pending_at > budget):
                     self.capture_drops += 1
                     pending = np.empty((0, CHANNELS), dtype=np.float32)

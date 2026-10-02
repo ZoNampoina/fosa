@@ -8,8 +8,8 @@ const {chromium, webkit, devices} = require('playwright');
 const output = process.env.FOSA_BROWSER_OUTPUT || '/tmp/fosa-browser-output';
 mkdirSync(output, {recursive:true});
 
-async function fixture() {
-  const child=spawn(process.env.PYTHON||'python',['-u','audio-bridge/tests/browser_server.py','--secure'],{stdio:['ignore','pipe','inherit']});
+async function fixture(localHttps=false) {
+  const child=spawn(process.env.PYTHON||'python',['-u','audio-bridge/tests/browser_server.py','--secure',...(localHttps?['--local-https']:[])],{stdio:['ignore','pipe','inherit']});
   const config=await new Promise((resolve,reject)=>{
     let text='';const timer=setTimeout(()=>{child.kill();reject(Error('Secure fixture startup timeout'))},45000);
     child.stdout.on('data',chunk=>{text+=chunk;const line=text.split('\n').find(s=>s.startsWith('{"url"'));if(line){clearTimeout(timer);resolve(JSON.parse(line))}});

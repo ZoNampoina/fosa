@@ -4,7 +4,7 @@ const {fixture,musician,signal,press,release}=require('./secure_browser_flow.cjs
 const output=process.env.FOSA_BROWSER_OUTPUT||'/tmp/fosa-browser-output';
 
 async function main(){
-  const f=await fixture();let chrome,safari;
+  const f=await fixture(true);let chrome,safari;
   try{
     const base=new URL(f.console).origin;
     const {token}=await (await fetch(base+'/api/local-console',{method:'POST',headers:{'X-FOSA-Console':'1'}})).json();
@@ -14,11 +14,11 @@ async function main(){
     }
     chrome=await chromium.launch({args:['--no-sandbox','--no-proxy-server','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
     safari=await webkit.launch();
-    const a=await musician(chrome,f.url,'PCM Android','Chef',devices['Pixel 7'],'pcm');
-    const b=await musician(chrome,f.url,'PCM Windows','Chant',{viewport:{width:1200,height:900}},'pcm');
-    const ios=await musician(safari,f.url,'PCM iPhone','Clavier',devices['iPhone 13'],'pcm');
-    const ipad=await musician(safari,f.url,'PCM iPad','Clavier',devices['iPad Pro 11'],'pcm');
-    const stable=await musician(chrome,f.url,'Opus listener','Chant',{},'opus');
+    const a=await musician(chrome,f.url,'PCM Android','Chef',{...devices['Pixel 7'],ignoreHTTPSErrors:true},'pcm');
+    const b=await musician(chrome,f.url,'PCM Windows','Chant',{viewport:{width:1200,height:900},ignoreHTTPSErrors:true},'pcm');
+    const ios=await musician(safari,f.url,'PCM iPhone','Clavier',{...devices['iPhone 13'],ignoreHTTPSErrors:true},'pcm');
+    const ipad=await musician(safari,f.url,'PCM iPad','Clavier',{...devices['iPad Pro 11'],ignoreHTTPSErrors:true},'pcm');
+    const stable=await musician(chrome,f.url,'Opus listener','Chant',{ignoreHTTPSErrors:true},'opus');
     const all=[a,b,ios,ipad,stable];
     for(const item of all)await signal(item.page,true);
     for(const item of [a,b,ios,ipad]){

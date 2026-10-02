@@ -2,6 +2,9 @@
 import argparse
 import asyncio
 import json
+import datetime
+import ipaddress
+import ssl
 from pathlib import Path
 import sys
 import tempfile
@@ -24,6 +27,26 @@ async def main():
                                   port=port, allow_origin=[], secure_mobile=secure, network={'adapters':adapters,
                                   'firewall':{'state':'unverified','message':'TEST FIXTURE'},'selfCheck':'passed'})
         bridge = Bridge(args)
+        tls_context = None
+        if '--local-https' in sys.argv:
+            # An isolated test certificate, never a product/mobile certificate installer.
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+            key=ec.generate_private_key(ec.SECP256R1())
+            name=x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME,'FOSA test fixture')])
+            now=datetime.datetime.now(datetime.timezone.utc)
+            cert=(x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                  .serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(minutes=1))
+                  .not_valid_after(now+datetime.timedelta(hours=1))
+                  .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]),critical=False)
+                  .sign(key,hashes.SHA256()))
+            cert_file=Path(folder)/'test-cert.pem';key_file=Path(folder)/'test-key.pem'
+            cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+            key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
+            tls_context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            tls_context.load_cert_chain(cert_file,key_file)
+            bridge.secure.config['clientUrl']='https://127.0.0.1:8878/network.html'
         # Known digital input is deliberately restricted to this test process.
         bridge.device={'name':'TEST FIXTURE · no MR18 hardware','driver':'TEST FIXTURE','asio':False,'inputs':18}
         bridge.stream=SimpleNamespace(active=True,channels=18,samplerate=48000,blocksize=256,latency=0,
@@ -55,6 +78,8 @@ async def main():
         runner=web.AppRunner(app,access_log=None)
         await runner.setup()
         await web.TCPSite(runner,'0.0.0.0',port).start()
+        if tls_context:
+            await web.TCPSite(runner,'127.0.0.1',8878,ssl_context=tls_context).start()
         if bridge.secure:
             for _ in range(120):
                 if bridge.secure.status['state']=='ready': break
