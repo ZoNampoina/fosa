@@ -54,6 +54,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
           FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
         run: node audio-bridge/tests/browser_flow.cjs
+      - name: Verify secure talkback through the actual signalling service
+        env:
+          NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
+          FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
+        run: node audio-bridge/tests/secure_browser_flow.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

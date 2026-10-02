@@ -14,13 +14,14 @@ from bridge import Bridge
 from lan import discover
 
 async def main():
+    secure = '--secure' in sys.argv
     adapters = discover()
     if not adapters:
         raise RuntimeError('A non-loopback LAN address is required to test an insecure HTTP origin')
     port = 8877
     with tempfile.TemporaryDirectory(prefix='fosa-browser-fixture-') as folder:
         args = argparse.Namespace(data_dir=folder, public_url=f'http://{adapters[0]["address"]}:{port}',
-                                  port=port, allow_origin=[], network={'adapters':adapters,
+                                  port=port, allow_origin=[], secure_mobile=secure, network={'adapters':adapters,
                                   'firewall':{'state':'unverified','message':'TEST FIXTURE'},'selfCheck':'passed'})
         bridge = Bridge(args)
         # Known digital input is deliberately restricted to this test process.
@@ -42,11 +43,19 @@ async def main():
         # This fixture must never enumerate/open hardware from a CI runner.
         async def test_start(app):
             bridge.tasks=[asyncio.create_task(bridge.pump())]
+            if bridge.secure:
+                bridge.tasks.append(asyncio.create_task(bridge.secure.run()))
         app.on_startup.clear()
         app.on_startup.append(test_start)
         runner=web.AppRunner(app,access_log=None)
         await runner.setup()
         await web.TCPSite(runner,'0.0.0.0',port).start()
+        if bridge.secure:
+            for _ in range(120):
+                if bridge.secure.status['state']=='ready': break
+                await asyncio.sleep(.25)
+            else:
+                raise RuntimeError(bridge.secure.status['message'])
         print(json.dumps({'url':bridge.join_url(), 'console':f'http://127.0.0.1:{port}/network.html?console=1'}),flush=True)
         try:
             await asyncio.Event().wait()

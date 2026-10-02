@@ -4,6 +4,8 @@
   const encode = new TextEncoder(), decode = new TextDecoder();
   const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const unb64 = text => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  // getRandomValues is available on the existing HTTP listen-only LAN page too.
+  const requestId = () => b64(crypto.getRandomValues(new Uint8Array(16)));
   const unwrap = result => {
     if (result.status >= 400) throw Object.assign(new Error(result.data?.error || 'Erreur du bridge'), {code: result.data?.code});
     return result.data;
@@ -27,7 +29,7 @@
     get ready() { return this.channel.readyState === 'open'; }
     async request(path, body, timeout = 5000) {
       if (!this.ready || this.channel.bufferedAmount > 128*1024 || this.pending.size >= 32) throw new Error('Liaison directe occupée ou interrompue');
-      const id = crypto.randomUUID();
+      const id = requestId();
       const result = new Promise((resolve, reject) => {
         const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Le PC ne répond plus sur le réseau local')); }, timeout);
         this.pending.set(id, {resolve, reject, timer});
@@ -75,7 +77,7 @@
         url.search = new URLSearchParams({apikey: this.config.publishableKey, vsn: '1.0.0'}).toString();
         const socket = new WebSocket(url.href); this.socket = socket;
         const timer = setTimeout(() => { socket.close(); reject(new Error('Connexion Internet au relais indisponible')); }, 12000);
-        const fail = () => { clearTimeout(timer); this.joined = false; clearInterval(this.heartbeat); reject(new Error('Connexion au relais interrompue. Vérifie Internet.')); };
+        const fail = () => { clearTimeout(timer); if(this.socket===socket){this.joined = false; clearInterval(this.heartbeat)} reject(new Error('Connexion au relais interrompue. Vérifie Internet.')); };
         socket.onopen = () => socket.send(JSON.stringify({topic: this.topic, event: 'phx_join', ref: '1', join_ref: '1',
           payload: {config: {broadcast: {ack: false, self: false}, presence: {enabled: false}, private: false}}}));
         socket.onmessage = async event => {
@@ -97,7 +99,7 @@
           } catch (_) { /* Ignore ciphertext that does not authenticate to this browser. */ }
         };
         socket.onerror = fail;
-        socket.onclose = () => { fail(); for (const item of this.pending.values()) item.reject(new Error('Relais déconnecté')); };
+        socket.onclose = () => { fail(); if(this.socket===socket)for (const item of this.pending.values()) item.reject(new Error('Relais déconnecté')); };
       }).finally(() => { this.connecting = null; });
       return this.connecting;
     }
@@ -111,7 +113,7 @@
     }
     async request(path, body, token = '', timeout = 12000, retryClock = true) {
       await this.connect();
-      const id = crypto.randomUUID(), iv = crypto.getRandomValues(new Uint8Array(12));
+      const id = requestId(), iv = crypto.getRandomValues(new Uint8Array(12));
       const data = encode.encode(JSON.stringify({id, path, body, token, sentAt: Date.now() + this.offset}));
       const ciphertext = await crypto.subtle.encrypt({name: 'AES-GCM', iv, additionalData: this.aad}, this.requestKey, data);
       const envelope = {v: 1, kind: 'request', epoch: this.descriptor.epoch, peer: this.peer, iv: b64(iv), data: b64(ciphertext)};
