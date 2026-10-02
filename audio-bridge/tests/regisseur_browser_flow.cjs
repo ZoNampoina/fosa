@@ -82,14 +82,14 @@ async function main(){
     const source=page.locator('[data-panel=live] .microphone-input');
     const deviceId=await source.locator('option').evaluateAll(options=>options.find(o=>o.value)?.value);
     assert.ok(deviceId);await source.selectOption(deviceId);
-    await page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended'));
+    await page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended')&&document.querySelector('#liveTalk').disabled);
     assert.equal(await page.locator('#liveTalk').isDisabled(),true);
     await page.locator('#liveEnableMic').click();await page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled);
     await page.locator('#stopPcTalk').click();
     await page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended'));
     assert.equal(await page.locator('#liveEnableMic').isDisabled(),false,'The stopped PC can prepare its connection again');
 
-    // An actual browser permission refusal is recoverable and explained in the UI.
+    // A permission refusal is recoverable and explained in the UI.
     await page.evaluate(()=>{
       const acquire=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);let refuse=true;
       navigator.mediaDevices.getUserMedia=async(...args)=>{if(refuse){refuse=false;throw new DOMException('Test permission refused','NotAllowedError');}return acquire(...args);};
