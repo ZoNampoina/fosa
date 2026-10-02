@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare versioned secure musician client
         run: |
-          mkdir -p musicians/v095 musicians/v096 musicians/v097
+          mkdir -p musicians/v095 musicians/v096 musicians/v097 musicians/v098
           git fetch --no-tags --depth=1 origin 987b0727540efd79ac5bc1e77a2f072efb642f40
           for asset in network.html network.js network.css network-relay.js network-relay-config.json fosa-icon.svg; do
             git show 987b0727540efd79ac5bc1e77a2f072efb642f40:"$asset" > "musicians/v095/$asset"
@@ -32,7 +32,11 @@ jobs:
           for asset in network.html network.js network.css network-relay.js network-relay-config.json low-latency.js low-latency-worklet.js fosa-icon.svg; do
             git show 5c3fb8e82760659f87703b4e7a24add84108aafb:"$asset" > "musicians/v096/$asset"
           done
-          cp network.html network.js network.css network-relay.js network-relay-config.json low-latency.js low-latency-worklet.js fosa-icon.svg musicians/v097/
+          git fetch --no-tags --depth=1 origin 5313e961e1d2ff126aba9820b8648cbeb800c47d
+          for asset in network.html network.js network.css network-relay.js network-relay-config.json low-latency.js low-latency-worklet.js fosa-icon.svg; do
+            git show 5313e961e1d2ff126aba9820b8648cbeb800c47d:"$asset" > "musicians/v097/$asset"
+          done
+          cp network.html network.js network.css network-relay.js network-relay-config.json low-latency.js low-latency-worklet.js fosa-icon.svg musicians/v098/
       - uses: actions/configure-pages@v5
         with:
           enablement: true

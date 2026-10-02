@@ -40,7 +40,7 @@ CAPTURE_ERRORS = (ValueError, KeyError, TypeError, OSError) + ((sd.PortAudioErro
 
 ROOT = Path(__file__).resolve().parent.parent
 WINDOWS = os.name == "nt"
-VERSION = "0.9.7-regisseur"
+VERSION = "0.9.8-mobile-microphones"
 
 # aiohttp uses the standard json module, which does not serialize NumPy scalar types.
 # Normalize them centrally so device/status endpoints cannot fail on np.bool_, np.int*, etc.

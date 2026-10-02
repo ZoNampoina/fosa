@@ -94,3 +94,9 @@ La restitution utilise AudioWorklet, avec un buffer ciblé de 5/10/20/40 ms et d
 `audio-bridge/start-low-latency-windows.cmd` ouvre directement **Régisseur · PC serveur** dans LIVE, sans code session à saisir. Le profil audio du PC possède sa permission micro dès sa création. **ACTIVER MON MICRO** établit sa liaison puis demande l’accès au microphone dans le navigateur ; maintenir **TALK** transmet aux destinataires choisis. **Source du micro** permet de choisir un casque, un micro USB ou le micro intégré si le périphérique par défaut est occupé par le pilote audio.
 
 Le master du PC démarre à 0 % pour parler sans ouvrir son monitoring ; le remonter permet d’écouter avec des écouteurs. MATRIX reste accessible pour autoriser les micros des musiciens. Le profil PC et ses réglages sont conservés au redémarrage, y compris une permission révoquée dans MATRIX. Télécharger le bridge mis à jour et relancer ce lanceur est nécessaire ; mettre à jour seulement la page Web ne modifie pas le serveur installé.
+
+## v0.9.8 — Micros des téléphones dans LIVE
+
+Sur le PC, LIVE affiche maintenant les **Micros des récepteurs** qui écoutent le serveur : cocher Micro pour une personne ou toucher **AUTORISER LES MICROS CONNECTÉS**. Chaque téléphone peut ensuite toucher **ACTIVER MON MICRO**, accepter l’accès au microphone du navigateur, puis maintenir TALK. Décocher Micro retire immédiatement son droit de parole. Cette commande concerne les récepteurs déjà connectés ; les nouveaux arrivants doivent aussi être autorisés.
+
+Le téléphone distingue une autorisation FOSA manquante, un lien HTTP limité à l’écoute et un refus de permission du navigateur ou du système. Le talkback sur téléphone exige le QR **Écoute + talkback · sécurisé** ouvert dans un navigateur compatible. Un téléphone déjà autorisé peut préparer sa liaison directement avec ACTIVER MON MICRO après un arrêt d’écoute.

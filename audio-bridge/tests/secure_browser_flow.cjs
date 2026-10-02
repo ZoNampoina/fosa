@@ -52,6 +52,7 @@ async function musician(browser, url, name, role, device={},engine='opus') {
   await page.waitForFunction(()=>window.testSockets.length>0&&window.testSockets.every(s=>s.readyState===WebSocket.CLOSED),null,{timeout:10000});
   assert.ok(requests.every(u=>!u.startsWith('http://')),'HTTPS client must never fetch the private HTTP server');
   assert.equal(await page.locator('#liveEnableMic').isDisabled(),true,'Regisseur permission is required');
+  assert.ok((await page.locator('#liveTalkNote').textContent()).includes('Sur le PC : LIVE'));
   assert.deepEqual(errors,[]);
   const credentials=await page.evaluate(()=>JSON.parse(localStorage.fosa_network_credentials)[JSON.parse(localStorage.fosa_network_server)]);
   console.log(JSON.stringify({name,secureJoinMs:Date.now()-start,transport:'actual encrypted Supabase WSS -> direct LAN data channel'}));
@@ -84,6 +85,11 @@ async function main() {
       assert.equal(response.status,200);return response.json();
     }
     chrome=await chromium.launch({args:['--no-sandbox','--no-proxy-server','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+    const operatorContext=await chrome.newContext({serviceWorkers:'block',viewport:{width:1200,height:900}});
+    const operator=await operatorContext.newPage(),operatorErrors=[];
+    operator.on('pageerror',e=>operatorErrors.push(e.message));
+    await operator.goto(f.console+'&regisseur=1&view=live');
+    await operator.locator('#pcMicrophones').waitFor({state:'visible'});
     const a=await musician(chrome,f.url,'TEST Android microphone','Chef',devices['Pixel 7']);
     const b=await musician(chrome,f.url,'TEST PC listener','Chant',{viewport:{width:1200,height:900}});
     const c=await musician(chrome,f.url,'TEST Android tablet listener','Clavier',{...devices['Pixel 7'],viewport:{width:800,height:1280}});
@@ -91,7 +97,10 @@ async function main() {
       p.mix.channels.forEach(ch=>ch.gain=0);await admin('mix',{id:p.id,mix:p.mix});
     }
     await signal(b.page,false);await signal(c.page,false);
-    await admin('matrix',{id:a.credentials.id,talkAllowed:true});
+    const androidPermission=operator.locator('[data-phone-mic="'+a.credentials.id+'"]');
+    await androidPermission.waitFor({state:'visible'});
+    await a.page.screenshot({path:output+'/android-microphone-blocked.png',fullPage:true});
+    await androidPermission.check();
     await a.page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);
     await a.page.locator('#liveEnableMic').click();
     await a.page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled,null,{timeout:12000});
@@ -115,6 +124,7 @@ async function main() {
     await a.page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);
     await a.page.evaluate(()=>{
       const acquire=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.testAcquireOriginal=acquire;
       navigator.mediaDevices.getUserMedia=async(...args)=>{const stream=await acquire(...args);await new Promise(resolve=>window.finishTestCapture=resolve);return stream};
     });
     await a.page.locator('#liveEnableMic').click();
@@ -125,12 +135,20 @@ async function main() {
     await a.page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended'));
     assert.equal(await a.page.locator('#talk').isDisabled(),true);
     console.log('PASS: late microphone permission cannot reopen a stopped session.');
+    // An authorized phone can activate its microphone directly after stopping playback.
+    await a.page.evaluate(()=>navigator.mediaDevices.getUserMedia=window.testAcquireOriginal);
+    await a.page.locator('.net-nav [data-view="live"]').click();
+    await a.page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);
+    await a.page.locator('#liveEnableMic').click();
+    await a.page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled,null,{timeout:25000});
+    await a.page.locator('.net-nav [data-view="mix"]').click();await a.page.locator('#stopAudio').click();
 
     safari=await webkit.launch();
     const ios=await musician(safari,f.url,'TEST WebKit iPhone microphone','Chant',devices['iPhone 13']);
     const iosState=(await admin('state')).users.find(p=>p.id===ios.credentials.id);
     iosState.mix.channels.forEach(ch=>ch.gain=0);await admin('mix',{id:ios.credentials.id,mix:iosState.mix});
-    await admin('matrix',{id:ios.credentials.id,talkAllowed:true});
+    await operator.waitForFunction(()=>[...document.querySelectorAll('[data-phone-mic]')].some(el=>el.getAttribute('aria-label').includes('TEST WebKit iPhone microphone')));
+    await operator.locator('#allowConnectedMics').click();
     await ios.page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);
     await ios.page.locator('#liveEnableMic').click();
     try {await ios.page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled,null,{timeout:12000})}
@@ -139,9 +157,17 @@ async function main() {
     await press(ios.page);await signal(b.page,true);await signal(c.page,false);
     await ios.page.screenshot({path:output+'/secure-iphone-talk.png',fullPage:true});
     await release(ios.page);await signal(b.page,false);
+    // Revoking from the PC LIVE card must release the phone microphone too.
+    const iosPermission=operator.locator('[data-phone-mic="'+ios.credentials.id+'"]');
+    await operator.waitForFunction(id=>document.querySelector('[data-phone-mic="'+id+'"]').checked,ios.credentials.id);
+    await iosPermission.uncheck();
+    await ios.page.waitForFunction(()=>document.querySelector('#liveEnableMic').disabled&&window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended'));
+    await operator.screenshot({path:output+'/pc-receiver-microphones.png',fullPage:true});
     const ipad=await musician(safari,f.url,'TEST WebKit iPad','Clavier',devices['iPad Pro 11']);
     await ipad.page.screenshot({path:output+'/secure-ipad.png',fullPage:true});
     for(const item of [a,b,c,ios,ipad])assert.deepEqual(item.errors,[]);
+    assert.deepEqual(operatorErrors,[]);
+    console.log('PASS: PC LIVE grants one Android microphone or all connected receivers, WebKit microphone activates, LIVE revocation ends capture, blocked phones show the PC authorization instruction, authorized Android can activate directly without another Listen action.');
     console.log('PASS: HTTPS QR + real encrypted relay + direct talkback in Chromium/WebKit; physical devices and MR18 untested.');
   } finally { await chrome?.close();await safari?.close();f.child.kill('SIGTERM'); }
 }

@@ -1,4 +1,4 @@
-const CACHE='fosa-v0.9.7';
+const CACHE='fosa-v0.9.8';
 const CORE=['./','./index.html','./local.html','./manifest.webmanifest','./fosa-icon.svg','./gate-processor.js','./v080.css','./v080.js','./network.html','./network.css','./network.js','./low-latency.js','./low-latency-worklet.js','./network-relay.js','./network-relay-config.json','./network-launcher.js'];
 const CDN='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
 self.addEventListener('install',e=>e.waitUntil((async()=>{const c=await caches.open(CACHE);await c.addAll(CORE);try{await c.add(CDN)}catch{}/* Never skipWaiting: keep the active LIVE version until all tabs close. */})()));

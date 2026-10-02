@@ -28,7 +28,7 @@ Si la page s’ouvre mais pas le son, vérifier la réception des paquets et l�
 ### Activer le talkback mobile
 
 1. Utiliser le QR **Écoute + talkback** affiché par le PC, puis toucher **ÉCOUTER** sur le téléphone. Un ancien lien `http://192.168…` reste limité à l’écoute sur mobile.
-2. Sur le PC, dans **MATRIX**, cocher **Micro** pour le musicien. Les destinataires doivent avoir **Écoute TB** cochée.
+2. Sur le PC, dans **LIVE → Micros des récepteurs**, cocher **Micro** pour la personne ou toucher **AUTORISER LES MICROS CONNECTÉS**. **MATRIX → Micro** reste disponible. Les nouveaux arrivants doivent aussi être autorisés. Les destinataires doivent avoir **Écoute TB** cochée dans MATRIX.
 3. Sur le téléphone, dans **LIVE**, toucher **ACTIVER MON MICRO** et accepter la demande du navigateur.
 4. Choisir **Tous**, un profil musical ou une personne, puis **maintenir TALK**. « PAROLE TRANSMISE » s’affiche après confirmation du serveur. Relâcher coupe la parole. **COUPER MON MICRO** libère le microphone.
 

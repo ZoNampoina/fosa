@@ -37,6 +37,7 @@ async function newMusician(browser,url,name,device={}){
  await page.waitForFunction(()=>{const a=window.testOutput;if(!a)return false;const samples=new Float32Array(a.fftSize);a.getFloatTimeDomainData(samples);return samples.some(x=>Math.abs(x)>.001)},null,{timeout:10000});
  assert.ok(Date.now()-start<30000,'Listen must connect within 30 seconds in this fixture');
  assert.equal(await page.locator('#liveTalk').isDisabled(),true,'HTTP talkback must be explicit and disabled');
+ assert.ok((await page.locator('#liveTalkNote').textContent()).includes('Ce lien HTTP permet seulement l’écoute'));
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'No horizontal overflow');
  assert.deepEqual(errors,[],'No browser runtime errors');
  console.log(JSON.stringify({device:name,listenMs:Date.now()-start,state:'audio packets received + Web Audio running'}));

@@ -24,6 +24,7 @@ const inviteValue=k=>invite.get(k)||query.get(k);
 let outputContext=null,outputSource=null,outputGain=null,playbackReady=false,receivedPackets=0,lastPacketsAt=0;
 let serverNetwork=null,setupQrUrl=null,joining=false;
 let relayClient=null,direct=null,controlSequence=0,talkConfirmed=false,micPending=false,micRequest=0,regisseurCredentials=null;
+let phoneMicSaving=false,phonePermissionRevision=0;
 let micDevice=get('fosa_talkback_device','');
 let engine=inviteValue('engine')==='pcm'?'pcm':get('fosa_monitoring_engine','opus');
 if(!['opus','pcm'].includes(engine))engine='opus';
@@ -55,7 +56,7 @@ async function api(path,{body,auth=true,timeout=6000}={}){
 function show(view){
  if(!$$('[data-panel]').some(x=>x.dataset.panel===view))view='audio';page=view;
  $$('[data-panel]').forEach(x=>x.hidden=x.dataset.panel!==view);$$('.net-nav [data-view]').forEach(x=>x.classList.toggle('selected',x.dataset.view===view));
- if(view==='talkback')renderTalkTargets();if(view==='mix')syncMix();if(view==='matrix')renderMatrix();if(view==='devices')renderDevices();if(view==='diagnostic')renderDiagnostic();
+ if(view==='live')renderPhoneMicrophones();if(view==='talkback')renderTalkTargets();if(view==='mix')syncMix();if(view==='matrix')renderMatrix();if(view==='devices')renderDevices();if(view==='diagnostic')renderDiagnostic();
 }
 function networkType(){const t=navigator.connection?.type;return ({ethernet:'Ethernet',wifi:'Wi-Fi',cellular:'Données mobiles',bluetooth:'Bluetooth'})[t]||'Réseau inconnu'}
 const fmt=(v,suffix=' ms')=>Number.isFinite(v)?v.toFixed(1)+suffix:'—';
@@ -67,13 +68,14 @@ function paintStatus(){
  $('#netType').textContent=networkType();$('#liveQuality').textContent=quality();$('#liveQuality').style.color=['CRITIQUE','INSTABLE'].includes(quality())?'var(--amber)':'';
  $('#liveLatency').textContent=(activeEngine==='pcm'?'Low-Latency · PCM 5 ms · ':activeEngine==='opus'?'Stable · Opus · ':'')+'Latence audio : non mesurée';
  $('#captureSummary').textContent=state?.connected?`${state.device?.name} · ${state.device?.driver} · ${state.sampleRate} Hz · ${state.buffer} échantillons · ${state.inputs} entrées`:(state?.error||'NON CONNECTÉ · aucune entrée détectée');
- $('#pcRegisseur').hidden=!regisseurCredentials;$('#welcomeCard').hidden=!!regisseurCredentials;
+ $('#pcMicrophones').hidden=!admin;$('#pcRegisseur').hidden=!regisseurCredentials;$('#welcomeCard').hidden=!!regisseurCredentials;
  $('#scanInterfaces').disabled=!admin;$('#startCapture').disabled=!admin;$('#interfaceSelect').disabled=!admin;
  $$('#master,#liveMaster,#muteAll,#liveMute,#ducking,#applyPreset,#restoreMix,#resetMix').forEach(el=>el.disabled=profile?.locked===true);$('#mixScope').textContent=profile?`${profile.name} · ${profile.role}${profile.locked?' · VERROUILLÉ':''}`:'Réglages locaux';
  const micAvailable=!!navigator.mediaDevices?.getUserMedia;
- const micNote=!micAvailable?'Écoute seule : scanne le QR « Écoute + talkback » du PC.':!profile?.talkAllowed?'Le régisseur doit autoriser ton micro dans MATRIX.':micPending?(direct?.ready?'Autorise le microphone dans la demande du navigateur.':'Préparation de la liaison talkback du PC…'):!direct?.ready?(regisseurCredentials?'Micro régisseur autorisé. Touche ACTIVER MON MICRO pour ouvrir la liaison PC.':'Touche ÉCOUTER pour établir la liaison locale.'):!micEnabled?'Touche ACTIVER MON MICRO, puis maintiens TALK.':talking?(talkConfirmed?'PAROLE TRANSMISE · '+$('#talkTarget').selectedOptions[0]?.textContent:'Ouverture du talkback…'):'Micro prêt · maintiens TALK pour parler.';
- $$('#liveTalkNote,#talkNote').forEach(el=>el.textContent=micNote);
- $$('#enableMic,#liveEnableMic').forEach(b=>{b.textContent=!micAvailable?'MICRO · LIEN SÉCURISÉ REQUIS':micPending?(direct?.ready?'AUTORISATION EN COURS…':'PRÉPARATION DU MICRO…'):micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO';b.disabled=!micAvailable||!profile?.talkAllowed||(!direct?.ready&&!micEnabled&&!regisseurCredentials)||micPending});
+ const blockedNote=microphoneBlocked();
+ const micNote=blockedNote|| (micPending?(direct?.ready?'Autorise le microphone dans la demande du navigateur.':'Préparation de la liaison talkback…'):!direct?.ready?'Micro autorisé. Touche ACTIVER MON MICRO pour préparer la liaison talkback.':!micEnabled?'Touche ACTIVER MON MICRO, accepte la demande du navigateur, puis maintiens TALK.':talking?(talkConfirmed?'PAROLE TRANSMISE · '+$('#talkTarget').selectedOptions[0]?.textContent:'Ouverture du talkback…'):'Micro prêt · maintiens TALK pour parler.');
+ $$('#liveTalkNote,#talkNote').forEach(el=>{el.textContent=micNote;el.classList.toggle('warning',!!blockedNote)});
+ $$('#enableMic,#liveEnableMic').forEach(b=>{b.textContent=!micAvailable?'MICRO · LIEN SÉCURISÉ REQUIS':!profile?.talkAllowed?'MICRO BLOQUÉ · AUTORISATION PC':micPending?(direct?.ready?'AUTORISATION EN COURS…':'PRÉPARATION DU MICRO…'):micEnabled?'COUPER MON MICRO':'ACTIVER MON MICRO';b.disabled=!micAvailable||!profile?.talkAllowed||micPending});
  $$('.talk').forEach(b=>{b.disabled=!micAvailable||!profile?.talkAllowed||!micEnabled||!direct?.ready;b.classList.toggle('talking',talking&&talkConfirmed);b.textContent=talking?(talkConfirmed?'PAROLE TRANSMISE':'CONNEXION TALK…'):'MAINTENIR TALK POUR PARLER'});
  $('#mixNotice').textContent=changed?'Modifications locales en attente du serveur.':profile?'Mix enregistré sur cet appareil et sur le serveur LAN.':'Réglages locaux : rejoins le serveur pour les appliquer au son.';
 }
@@ -115,10 +117,10 @@ async function pollMeters(){
 }
 async function refresh(){
  if(!token()||polling)return;polling=true;
- try{const revision=localRevision,dirtyAtStart=changed||sending;const next=await api('state');state=next;profile=admin&&regisseurCredentials?next.users?.find(p=>p.id===regisseurCredentials.id)||null:next.profile;
+ try{const revision=localRevision,permissionRevision=phonePermissionRevision,dirtyAtStart=changed||sending;const next=await api('state');if(permissionRevision!==phonePermissionRevision)return;state=next;profile=admin&&regisseurCredentials?next.users?.find(p=>p.id===regisseurCredentials.id)||null:next.profile;
   if(profile){if(!profile.talkAllowed&&(micEnabled||micPending))await disableMic();if(!dirtyAtStart&&!changed&&!sending&&revision===localRevision&&(profile.mixVersion||0)>=confirmedMixVersion&&JSON.stringify(profile.mix)!==JSON.stringify(mix)){mix=profile.mix;syncMix()}if(changed&&!profile.locked)await flush()}
   paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(page==='devices')renderDevices();
-  if(profile?.locked){mix=profile.mix;changed=false;syncMix()}if(page==='matrix'&&document.activeElement?.closest('#matrix')==null)renderMatrix();renderTalkTargets();
+  if(profile?.locked){mix=profile.mix;changed=false;syncMix()}if(page==='matrix'&&document.activeElement?.closest('#matrix')==null)renderMatrix();renderTalkTargets();renderPhoneMicrophones();
   if(admin)await updateSetup();
  }catch(e){state=null;paintStatus();updateMeters();if(page==='diagnostic')renderDiagnostic();if(desired)notice('Serveur momentanément inaccessible. Le dernier mix est conservé.');}
  finally{polling=false}
@@ -174,17 +176,24 @@ function attachOutput(stream){
  else{audio.muted=false;audio.play().then(()=>{playbackReady=true;paintStatus()}).catch(()=>notice('Audio reçu : touche ÉCOUTER pour autoriser la lecture.'))}
 }
 function applyJitter(){for(const r of pc?.getReceivers()||[])if('jitterBufferTarget'in r)try{r.jitterBufferTarget=Number($('#jitterTarget').value)}catch{}}
+function microphoneBlocked(){
+ if(!isSecureContext)return 'Ce lien HTTP permet seulement l’écoute. Sur le PC, choisis le QR « Écoute + talkback · sécurisé », puis ouvre-le dans Chrome sur Android ou Safari sur iPhone.';
+ if(!navigator.mediaDevices?.getUserMedia)return 'Ce navigateur ne permet pas l’accès au micro. Ouvre le QR sécurisé dans Chrome sur Android ou Safari sur iPhone, plutôt que dans une application de messagerie.';
+ if(!profile)return 'Rejoins le PC serveur avec ton profil avant d’activer le micro.';
+ if(!profile.talkAllowed)return 'Micro bloqué côté FOSA. Sur le PC : LIVE → AUTORISER LES MICROS CONNECTÉS, ou cocher Micro sous ton nom dans MATRIX.';
+ return '';
+}
 async function enableMic(){
  if(micEnabled){await disableMic();return}if(micPending)return;
- if(!profile?.talkAllowed){notice('Le régisseur doit autoriser ton micro dans MATRIX.');return}if(!navigator.mediaDevices?.getUserMedia){notice('Scanne le QR « Écoute + talkback » affiché par le PC.');return}
- if(regisseurCredentials&&!direct?.ready){
+ const blocked=microphoneBlocked();if(blocked){notice(blocked);return}
+ if(!direct?.ready){
   unlockOutput();const preparation=++micRequest;micPending=true;paintStatus();
-  try{await startAudio();const deadline=Date.now()+8000;while(!direct?.ready&&desired&&Date.now()<deadline&&preparation===micRequest)await new Promise(r=>setTimeout(r,50));if(preparation!==micRequest||!profile?.talkAllowed)return;if(!direct?.ready)throw Error('La liaison talkback du PC ne répond pas. Relance le bridge et réessaie.')}catch(e){notice(e.message);return}finally{if(preparation===micRequest)micPending=false;paintStatus()}
+  try{await startAudio();const deadline=Date.now()+8000;while(!direct?.ready&&desired&&Date.now()<deadline&&preparation===micRequest)await new Promise(r=>setTimeout(r,50));if(preparation!==micRequest||!profile?.talkAllowed)return;if(!direct?.ready)throw Error('La liaison talkback ne répond pas. Vérifie la connexion au PC puis réessaie.')}catch(e){notice(e.message);return}finally{if(preparation===micRequest)micPending=false;paintStatus()}
  }
  if(!direct?.ready||!transceiver){notice('Touche ÉCOUTER avant d’activer ton micro.');return}
  const request=++micRequest,sender=transceiver.sender;micPending=true;paintStatus();let captured;
  try{captured=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false,channelCount:1,...(micDevice?{deviceId:{exact:micDevice}}:{})}});captured.getTracks().forEach(t=>t.enabled=false);if(request!==micRequest||sender!==transceiver?.sender||!profile?.talkAllowed||!direct?.ready){captured.getTracks().forEach(t=>t.stop());return}await sender.replaceTrack(captured.getAudioTracks()[0]);if(request!==micRequest||sender!==transceiver?.sender||!profile?.talkAllowed||!direct?.ready){captured.getTracks().forEach(t=>t.stop());await sender.replaceTrack(null);return}mic=captured;micEnabled=true;mic.getAudioTracks()[0].onended=()=>{disableMic();notice('Micro interrompu par le système. Active-le à nouveau pour parler.')};notice('Micro prêt : '+(mic.getAudioTracks()[0].label||'micro système')+'. Maintiens TALK pour parler.');await microphoneInputs()}
- catch(e){captured?.getTracks().forEach(t=>t.stop());if(request===micRequest)notice(e.name==='NotAllowedError'?'Micro refusé. Autorise le microphone pour ce site dans le navigateur, puis réessaie.':e.name==='NotFoundError'?'Aucun microphone disponible sur cet appareil.':e.name==='NotReadableError'?'Ce micro est occupé ou bloqué par Windows. Choisis un autre micro (casque, USB ou intégré), puis réessaie.':e.name==='OverconstrainedError'?'Le micro choisi n’est plus disponible. Sélectionne Micro système puis réessaie.':'Micro : '+e.message)}finally{if(request===micRequest)micPending=false;await microphoneInputs();paintStatus()}
+ catch(e){captured?.getTracks().forEach(t=>t.stop());if(request===micRequest)notice(e.name==='NotAllowedError'?'Micro refusé. Autorise le microphone pour FOSA dans le navigateur et les réglages du téléphone ou du PC, puis réessaie.':e.name==='NotFoundError'?'Aucun microphone disponible sur cet appareil.':e.name==='NotReadableError'?'Ce micro est occupé ou bloqué par le système. Ferme les autres applications utilisant le micro, ou choisis une autre source puis réessaie.':e.name==='OverconstrainedError'?'Le micro choisi n’est plus disponible. Sélectionne Micro système puis réessaie.':'Micro : '+e.message)}finally{if(request===micRequest)micPending=false;await microphoneInputs();paintStatus()}
 }
 async function disableMic(){micRequest++;stopTalk();mic?.getTracks().forEach(t=>t.stop());mic=null;micEnabled=false;micPending=false;try{await transceiver?.sender.replaceTrack(null)}catch{}paintStatus()}
 function startTalk(e){if(!micEnabled||!profile?.talkAllowed||!direct?.ready){notice('Active d’abord ton micro après autorisation du régisseur.');return}e?.preventDefault();if(e?.pointerId!==undefined)e.currentTarget?.setPointerCapture?.(e.pointerId);talking=true;talkConfirmed=false;mic?.getTracks().forEach(t=>t.enabled=true);sendControl();paintStatus()}
@@ -248,6 +257,24 @@ async function updateSetup(){
  $('#networkHelp').textContent=serverNetwork.lastClient?'Le serveur a reçu une requête d’un autre appareil. Si le son manque, consulte DIAGNOSTIC : paquets reçus, lecture et source sont contrôlés séparément.':'Le contrôle HTTP depuis ce PC ne prouve pas l’accès depuis le téléphone. Si le QR ne s’ouvre pas : même Wi-Fi, réseau invité et isolation des appareils, VPN ou autorisation réseau local du navigateur sont à vérifier.';
  $('#welcomeCard').hidden=true;
 }
+function connectedReceivers(){return (state?.users||[]).filter(p=>p.connected&&p.id!==regisseurCredentials?.id)}
+function renderPhoneMicrophones(){
+ const card=$('#pcMicrophones');card.hidden=!admin;if(!admin)return;
+ const users=connectedReceivers(),blocked=users.filter(p=>!p.talkAllowed),button=$('#allowConnectedMics');
+ button.disabled=phoneMicSaving||!blocked.length;
+ button.textContent=phoneMicSaving?'AUTORISATION EN COURS…':'AUTORISER LES MICROS CONNECTÉS';
+ $('#phoneMicSummary').textContent=!users.length?'Les récepteurs apparaissent ici après avoir touché ÉCOUTER.':blocked.length?`${blocked.length} micro(s) à autoriser sur ${users.length} récepteur(s) connecté(s).`:`${users.length} micro(s) autorisé(s) côté FOSA. Active ensuite le micro sur chaque appareil.`;
+ if(phoneMicSaving){$$('#phoneMicPermissions input').forEach(el=>el.disabled=true);return}
+ const html=users.map(p=>`<label class="phone-microphone"><input type="checkbox" data-phone-mic="${esc(p.id)}" ${p.talkAllowed?'checked':''} aria-label="Autoriser le micro de ${esc(p.name)}"><span><strong>${esc(p.name)}</strong><small>${esc(p.role)} · ${p.talkAllowed?'Micro autorisé':'Micro bloqué'}</small></span><b>Micro</b></label>`).join('');
+ const list=$('#phoneMicPermissions'),signature=JSON.stringify(users.map(p=>[p.id,p.name,p.role,p.talkAllowed]));
+ if(list.dataset.signature!==signature){list.innerHTML=html;list.dataset.signature=signature}
+ $$('[data-phone-mic]').forEach(el=>{el.disabled=false;el.checked=users.find(p=>p.id===el.dataset.phoneMic)?.talkAllowed===true});
+}
+async function setPhoneMicrophones(ids,allowed){
+ if(!admin||phoneMicSaving||!ids.length)return;
+ phoneMicSaving=true;phonePermissionRevision++;renderPhoneMicrophones();let done=0;
+ try{for(const id of ids){const updated=await api('matrix',{body:{id,talkAllowed:allowed}});phonePermissionRevision++;const user=state?.users?.find(p=>p.id===id);if(user)Object.assign(user,updated);done++}await refresh();notice(allowed?'Micro(s) autorisé(s). Sur les appareils : ACTIVER MON MICRO, autoriser le navigateur, puis maintenir TALK.':'Autorisation micro retirée. La parole est coupée côté serveur.')}catch(e){notice(`${done}/${ids.length} autorisation(s) modifiée(s). `+e.message)}finally{phoneMicSaving=false;renderPhoneMicrophones()}
+}
 function renderTalkTargets(){const selected=$('#talkTarget').value,targets=(state?.talkTargets||[]).filter(p=>p.id!==profile?.id);const roles=[...new Set(targets.map(p=>p.role))];const options='<option value="all">Tous les auditeurs autorisés</option>'+roles.map(role=>`<option value="role:${esc(role)}">Profil · ${esc(role)}</option>`).join('')+targets.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.role)}</option>`).join('');for(const el of $$('#talkTarget,#liveTalkTarget')){if(el.innerHTML!==options)el.innerHTML=options;el.value=[...el.options].some(o=>o.value===selected)?selected:'all'}if($('#talkTarget').value!==selected)stopTalk()}
 function renderDevices(){const users=state?.users;if(!users){$('#devices').textContent='Console régisseur requise.';return}$('#devices').innerHTML=users.length?`<table><thead><tr>${['Utilisateur','Appareil','Mix','Moteur','Talkback','Connexion','RTT','Latence audio'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${users.map(p=>`<tr><td>${esc(p.name)}</td><td title="${esc(p.device)}">${/Android/i.test(p.device)?'Android':/iPhone|iPad/i.test(p.device)?'iOS':p.connected?'PC / navigateur':'—'}</td><td>${esc(p.role)}</td><td>${p.monitoringEngine==='pcm'?'PCM 5 ms':p.connected?'Opus':'—'}${p.pcm?'<br>'+p.pcm.congestionDrops+' abandons serveur':''}</td><td>${p.talkAllowed?'Micro autorisé':'Écoute'}${p.talkListen?'':' OFF'}</td><td>${p.connected?esc(p.network):'Hors ligne'}</td><td>${fmt(p.metrics?.rtt)}</td><td>Non mesurée</td></tr>`).join('')}</tbody></table>`:'Aucun profil musicien. Rejoins le bridge sur un autre appareil.'}
 function renderMatrix(){const users=state?.users;if(!admin||!users){$('#matrix').textContent='';return}$('#matrixHint').textContent='Assignations et permissions appliquées par le serveur. Mute et niveaux sont propres à chaque musicien.';if(!users.length){$('#matrix').textContent='Aucun profil musicien connecté.';return}
@@ -270,6 +297,8 @@ function bind(){
  $$('#master,#liveMaster').forEach(e=>e.oninput=()=>{if(profile?.locked){syncMix();return}mix.master=Number(e.value)/100;edit()});
  $$('[data-solo]').forEach(b=>{b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);mix.channels[Number(b.dataset.solo)].solo=true;edit()};const release=()=>{if(mix.channels[Number(b.dataset.solo)].solo){mix.channels[Number(b.dataset.solo)].solo=false;edit()}};b.onpointerup=release;b.onpointercancel=release;b.onlostpointercapture=release;b.onkeydown=e=>{if(e.key===' '){e.preventDefault();mix.channels[Number(b.dataset.solo)].solo=true;edit()}};b.onkeyup=release;b.onblur=release});
  $('#matrix').onchange=async e=>{const t=e.target,p=state?.users?.find(p=>p.id===t.dataset.user);if(!p)return;try{if(t.dataset.permission)await api('matrix',{body:{id:p.id,[t.dataset.permission]:t.checked}});if(t.dataset.assign!==undefined){p.allowed[Number(t.dataset.assign)]=t.checked;await api('matrix',{body:{id:p.id,allowed:p.allowed}})}if(t.dataset.matrixGain!==undefined){p.mix.channels[Number(t.dataset.matrixGain)].gain=Number(t.value)/100;await api('mix',{body:{id:p.id,mix:p.mix}})}await refresh()}catch(err){notice(err.message)}};
+ $('#allowConnectedMics').onclick=()=>setPhoneMicrophones(connectedReceivers().filter(p=>!p.talkAllowed).map(p=>p.id),true);
+ $('#phoneMicPermissions').onchange=e=>{const id=e.target.dataset.phoneMic;if(id)setPhoneMicrophones([id],e.target.checked)};
  $('#stopPcTalk').onclick=stopAudio;
  $$('.microphone-input').forEach(el=>el.onchange=async()=>{micDevice=el.value;put('fosa_talkback_device',micDevice);$$('.microphone-input').forEach(other=>other.value=micDevice);await disableMic();notice('Source micro choisie. Touche ACTIVER MON MICRO pour l’utiliser.')});
  $('#detect').onclick=detect;$('#joinNetwork').onclick=()=>join(false);$('#joinListen').onclick=()=>join(true);$('#adminLogin').onclick=adminLogin;$('#scanInterfaces').onclick=scanInterfaces;
@@ -310,7 +339,7 @@ async function boot(){
  $('#serverUrl').value=server;show(query.get('view')||'audio');paintStatus();renderDiagnostic();
  if(musician){$('#welcomeCard h1').textContent='Rejoindre FOSA';$('#serverAddressForm').hidden=true}
  try{await api('health',{auth:false,timeout:3000});if(query.has('console')&&['127.0.0.1','localhost'].includes(location.hostname)){
-  const r=await fetch(server+'/api/local-console',{method:'POST',headers:{'X-FOSA-Console':'1'}});if(!r.ok)throw Error('Console locale indisponible');admin=(await r.json()).token;state=await api('state');$('#bufferSelect').value=String(state.buffer||state.requestedBuffer||256);paintStatus();await prepareRegisseur();await scanInterfaces();await updateSetup();if(query.has('regisseur')){show('live');notice('Régisseur PC prêt. Active ton micro pour parler ; MATRIX permet d’autoriser les musiciens.')}else notice('Console régisseur PC prête.');
+  const r=await fetch(server+'/api/local-console',{method:'POST',headers:{'X-FOSA-Console':'1'}});if(!r.ok)throw Error('Console locale indisponible');admin=(await r.json()).token;state=await api('state');$('#bufferSelect').value=String(state.buffer||state.requestedBuffer||256);paintStatus();await prepareRegisseur();await scanInterfaces();await updateSetup();if(query.has('regisseur')){show('live');notice('Régisseur PC prêt. Autorise les micros des récepteurs dans LIVE ; active ton micro pour parler.')}else notice('Console régisseur PC prête.');
  }}catch(e){notice('Bridge inaccessible : '+e.message)}
  if(token()&&!admin){try{const s=await api('state');state=s;profile=s.profile;if(profile){mix=normalize(profile.mix);changed=false;syncMix();show(query.get('view')||'live');if(get('fosa_network_resume:'+server,false)){desired=true;startAudio()}}}catch{}}
  $$('#joinListen,#joinNetwork').forEach(b=>b.disabled=false);
