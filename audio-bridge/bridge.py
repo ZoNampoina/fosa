@@ -115,7 +115,7 @@ class Bridge:
         for profile in self.saved['profiles'].values():
             profile['mix'] = clean_mix(profile['mix'], self.channel_count)
         self.alternative = False
-        self.panic = False
+        self.panic = self.saved.get("panic") is True
         self.events = deque(maxlen=1000)
         self.dsp_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='FOSA-DSP')
         self.save_lock = asyncio.Lock()
@@ -707,6 +707,7 @@ class Bridge:
         b = await req.json()
         if p is None:
             self.panic = b.get('active') is not False
+            self.saved["panic"] = self.panic
             self.log('panic_all', active=self.panic)
         else:
             # Safety mute always permitted, including locked profiles.
@@ -716,6 +717,7 @@ class Bridge:
             p['mix'] = dict(p['mix'], muteAll=active)
             p['mixVersion'] = p.get('mixVersion', 0)+1
             self.log('panic_personal', id=p['id'], active=active)
+        await self.save()
         return json_response({'active': self.panic if p is None else p['mix']['muteAll']})
 
     async def auto_level(self, req):
@@ -925,7 +927,7 @@ class Bridge:
                         candidates = [d for d in devices if d["inputs"] >= (1 if self.alternative else CHANNELS) and d.get("usable", True) and
                                       ((self.wanted and d["name"] == self.wanted["name"] and d["driver"] == self.wanted["driver"]) or
                                        (not self.wanted and (d["mr18"] or d["midasUsb"])))]
-                        candidates.sort(key=lambda d: not d["asio"])
+                        candidates.sort(key=lambda d: d.get("priority", 0 if d["asio"] else 4))
                         if candidates:
                             await asyncio.to_thread(self.open_device, candidates[0]["id"], self.buffer)
                         else:

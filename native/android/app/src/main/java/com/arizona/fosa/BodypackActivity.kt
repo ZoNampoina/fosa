@@ -69,8 +69,10 @@ class BodypackActivity : Activity() {
             if(!text.contains("://"))text="http://$text"
             val uri=URI(text); val host=uri.host ?: throw IllegalArgumentException("Adresse invalide")
             // No untrusted internet pages get a JavaScript bridge into the audio service.
-            val local=host=="localhost" || host.startsWith("192.168.") || host.startsWith("10.") ||
-                (host.startsWith("172.") && (host.split('.').getOrNull(1)?.toIntOrNull() ?: 0) in 16..31) || host.endsWith(".local")
+            val octets=host.split('.').map { it.toIntOrNull() }
+            val privateIp=octets.size==4 && octets.all{it!=null && it in 0..255} &&
+                (octets[0]==10 || (octets[0]==192 && octets[1]==168) || (octets[0]==172 && octets[1] in 16..31))
+            val local=host=="localhost" || privateIp || host.endsWith(".local")
             require(local && uri.scheme in listOf("http","https") && uri.userInfo==null) { "Adresse LAN privée requise" }
             val port=if(uri.port<0)8765 else uri.port
             val next="${uri.scheme}://$host:$port"

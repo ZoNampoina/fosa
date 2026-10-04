@@ -180,6 +180,7 @@ class BodypackService : Service() {
         val bytes = ByteArray(1200); val packet = DatagramPacket(bytes, bytes.size)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         var previousTime = 0L; var previousSequence = -1L
+        var highest = -1L; var replayMask = 0L
         while (running.get() && !udp.isClosed) try {
             packet.length = bytes.size; udp.receive(packet)
             if (packet.length != 1017 || !bytes.copyOfRange(0,4).contentEquals("FNA1".toByteArray()) || !bytes.copyOfRange(4,12).contentEquals(streamId)) { invalid++; continue }
@@ -187,6 +188,15 @@ class BodypackService : Service() {
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(outputKey, "AES"), GCMParameterSpec(128, bytes.copyOfRange(4,16)))
             cipher.updateAAD(bytes,0,16)
             val plain = cipher.doFinal(bytes,16,packet.length-16)
+            if(seq>highest) {
+                val distance=seq-highest
+                replayMask=if(distance>=64)1L else (replayMask shl distance.toInt()) or 1L
+                highest=seq
+            } else {
+                val age=highest-seq
+                if(age>=64 || (replayMask and (1L shl age.toInt()))!=0L){invalid++;continue}
+                replayMask=replayMask or (1L shl age.toInt())
+            }
             if (plain[0] != 'A'.code.toByte()) { invalid++; continue }
             val view = ByteBuffer.wrap(plain,1,984).slice().order(ByteOrder.LITTLE_ENDIAN)
             if (view.int != 0x314c4c46 || (view.int.toLong() and 0xffffffffL) != seq) { invalid++; continue }

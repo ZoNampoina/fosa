@@ -31,7 +31,7 @@ class MonitorEngine:
         n = len(samples)
         if samples.ndim != 2 or samples.shape[1] != len(mix['channels']):
             raise ValueError('Input/mix channel count mismatch')
-        invalid = not np.isfinite(samples).all() or (voice is not None and not np.isfinite(voice).all())
+        invalid = not np.isfinite(samples).all() or np.max(np.abs(samples)) > 8 or (voice is not None and (not np.isfinite(voice).all() or np.max(np.abs(voice)) > 8))
         if invalid:
             self.invalid += 1
             samples = np.zeros_like(samples)
@@ -57,16 +57,18 @@ class MonitorEngine:
         # BEFORE peaks, without adding another audio block to the pipeline.
         envelope = np.max(np.abs(output), axis=1)
         wanted = np.minimum(1., CEILING / np.maximum(envelope, 1e-12))
-        attack = math.exp(-1 / (RATE * .001))
-        for i in range(n-2, -1, -1):
-            wanted[i] = min(wanted[i], 1-(1-wanted[i+1])*attack)
+        # Vectorized envelope recurrences: identical exponential ballistics without
+        # Python per-sample loops (important with several simultaneous bodypacks).
+        indices = np.arange(n)
+        attack_decay = np.exp(-indices / (RATE*.001))
+        reduction = (1-wanted)[::-1]
+        reduction = (np.maximum.accumulate(reduction/attack_decay)*attack_decay)[::-1]
         release = math.exp(-1/(RATE*.1))
-        attenuation = np.empty(n, np.float32)
-        level = self.reduction
-        for i in range(n):
-            level = min(float(wanted[i]), 1-(1-level)*release)
-            attenuation[i] = level
-        self.reduction = level
+        release_decay = np.exp(-indices/(RATE*.1))
+        reduction = np.maximum(np.maximum.accumulate(reduction/release_decay)*release_decay,
+                               (1-self.reduction)*release*release_decay)
+        attenuation = 1-reduction
+        self.reduction = float(attenuation[-1])
         output *= attenuation[:, None]
         target_master = 0. if panic or invalid or mix.get('muteAll') else mix['master']
         output *= self.master + (target_master-self.master)*ramp
