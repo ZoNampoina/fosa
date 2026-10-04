@@ -118,6 +118,7 @@ class Bridge:
         self.panic = self.saved.get("panic") is True
         self.events = deque(maxlen=1000)
         self.dsp_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='FOSA-DSP')
+        self.device_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='FOSA-device')
         self.save_lock = asyncio.Lock()
         self.native = NativeProtocol()
         self.discovery = StageDiscovery()
@@ -174,6 +175,9 @@ class Bridge:
         with contextlib.suppress(OSError):
             tmp.chmod(0o600)
         tmp.replace(self.file)
+
+    async def device_call(self, method, *args):
+        return await asyncio.get_running_loop().run_in_executor(self.device_pool, method, *args)
 
     def devices(self):
         return describe(sd, WINDOWS)
@@ -279,9 +283,13 @@ class Bridge:
         self.startup = 'Waiting for audio callback'
 
     def connected(self):
-        return bool(self.stream and self.device and self.stream.active and
-                    (not WINDOWS or self.device["asio"] or self.alternative) and self.stream.channels == self.channel_count and
-                    round(self.stream.samplerate) == RATE and time.monotonic() - self.last_capture < 1)
+        try:
+            return bool(self.stream and self.device and self.stream.active and
+                        (not WINDOWS or self.device['asio'] or self.alternative) and
+                        self.stream.channels == self.channel_count and round(self.stream.samplerate) == RATE and
+                        time.monotonic()-self.last_capture < 1)
+        except (OSError, RuntimeError, *CAPTURE_ERRORS):
+            return False
 
     def profile(self, req, admin=False):
         token = req.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -468,7 +476,7 @@ class Bridge:
 
     async def list_devices(self, req):
         self.profile(req, admin=True)
-        return json_response({"devices": self.devices()})
+        return json_response({"devices": await self.device_call(self.devices)})
 
     async def get_meters(self, req):
         p = self.profile(req)
@@ -497,7 +505,7 @@ class Bridge:
             raise ValueError("Buffer non pris en charge")
         async with self.configure_lock:
             try:
-                await asyncio.to_thread(self.open_device, int(b["device"]), buffer)
+                await self.device_call(self.open_device, int(b["device"]), buffer)
             except Exception as e:
                 self.error = str(e)
                 raise ValueError("Capture : " + str(e)) from e
@@ -560,6 +568,9 @@ class Bridge:
         for key in ("locked", "talkAllowed", "talkListen"):
             if key in b:
                 p[key] = b[key] is True
+        if p['locked'] or p.get('permissions', {}).get('solo') is False:
+            p['mix'] = dict(p['mix'], channels=[dict(c, solo=False) for c in p['mix']['channels']])
+        p['mixVersion'] = p.get('mixVersion', 0)+1
         if not p["talkAllowed"] and p["id"] in self.clients:
             self.clients[p["id"]]["talkUntil"] = 0
         if "allowed" in b:
@@ -890,6 +901,11 @@ class Bridge:
                 load = self.processing_ms/5*100
                 self.audio_cpu = load if self.audio_cpu is None else .95*self.audio_cpu+.05*load
                 for c, output in outputs:
+                    levels = c.get('dsp').telemetry if c.get('dsp') else {}
+                    limiting = levels.get('limiterReductionDb', 0) >= 3
+                    if limiting and not c.get('wasLimiting'):
+                        self.log('limiter_active', reductionDb=levels['limiterReductionDb'])
+                    c['wasLimiting'] = limiting
                     if c.get('engine') in ('pcm', 'native'):
                         c['pcm'].feed(output, (time.monotonic()-captured_at)*1000)
                     else:
@@ -918,18 +934,18 @@ class Bridge:
                 try:
                     async with self.configure_lock:
                         if self.stream:
-                            await asyncio.to_thread(self.stream.close)
+                            await self.device_call(self.stream.close)
                             self.stream = None
                         # Re-enumerate after hotplug only with capture stopped.
-                        await asyncio.to_thread(sd._terminate)
-                        await asyncio.to_thread(sd._initialize)
-                        devices = self.devices()
+                        await self.device_call(sd._terminate)
+                        await self.device_call(sd._initialize)
+                        devices = await self.device_call(self.devices)
                         candidates = [d for d in devices if d["inputs"] >= (1 if self.alternative else CHANNELS) and d.get("usable", True) and
                                       ((self.wanted and d["name"] == self.wanted["name"] and d["driver"] == self.wanted["driver"]) or
                                        (not self.wanted and (d["mr18"] or d["midasUsb"])))]
                         candidates.sort(key=lambda d: d.get("priority", 0 if d["asio"] else 4))
                         if candidates:
-                            await asyncio.to_thread(self.open_device, candidates[0]["id"], self.buffer)
+                            await self.device_call(self.open_device, candidates[0]["id"], self.buffer)
                         else:
                             if not self.wanted and any(d["mr18"] or d["midasUsb"] for d in devices):
                                 self.error = "Midas détectée, mais aucun pilote ASIO avec 18 entrées disponible. Vérifie le pilote Midas 64 bits."
@@ -937,6 +953,13 @@ class Bridge:
                                 self.error = "MR18 non connectée" if not self.wanted else "Interface déconnectée — reconnexion en cours"
                 except Exception as e:
                     self.error = str(e)
+            source = self.connected()
+            if source != getattr(self, 'was_source', False):
+                self.log('audio_device_ready' if source else 'audio_device_lost')
+            self.was_source = source
+            if self.xruns != getattr(self, 'logged_xruns', 0):
+                self.log('capture_xrun', total=self.xruns)
+                self.logged_xruns = self.xruns
             for pid, c in list(self.clients.items()):
                 if (c.get("pc") and c["pc"].connectionState in ("closed", "failed")) or (not self.client_connected(c) and now-c["created"] > 30):
                     await self.close_client(pid)
@@ -995,11 +1018,12 @@ class Bridge:
         for pid in list(self.clients):
             await self.close_client(pid)
         if self.stream:
-            self.stream.close()
+            await self.device_call(self.stream.close)
         if self.native.transport:
             self.native.transport.close()
         await self.discovery.close()
         self.dsp_pool.shutdown(wait=True)
+        self.device_pool.shutdown(wait=True)
 
     def app(self):
         @web.middleware

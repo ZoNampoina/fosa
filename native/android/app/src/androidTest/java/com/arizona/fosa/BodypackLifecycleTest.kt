@@ -60,7 +60,7 @@ class BodypackLifecycleTest {
             }catch(_:Exception){}
         }.apply{start()}
         val outputThread=Thread {
-            var seq=0;val cipher=Cipher.getInstance("AES/GCM/NoPadding")
+            var seq=0;val cipher=Cipher.getInstance("AES/GCM/NoPadding");var deadline=SystemClock.elapsedRealtimeNanos()
             while(active.get()) {
                 val address=endpoint.get()
                 if(address!=null)try {
@@ -70,7 +70,9 @@ class BodypackLifecycleTest {
                     cipher.init(Cipher.ENCRYPT_MODE,SecretKeySpec(receiveKey,"AES"),GCMParameterSpec(128,header.copyOfRange(4,16)));cipher.updateAAD(header)
                     val data=header+cipher.doFinal(payload.array());udp.send(DatagramPacket(data,data.size,address));seq++
                 }catch(_:Exception){}
-                Thread.sleep(5)
+                deadline+=5_000_000L
+                val remaining=deadline-SystemClock.elapsedRealtimeNanos()
+                if(remaining>0)Thread.sleep(remaining/1_000_000L,(remaining%1_000_000L).toInt()) else if(remaining < -30_000_000L)deadline=SystemClock.elapsedRealtimeNanos()
             }
         }.apply{start()}
         val scenario=ActivityScenario.launch(BodypackActivity::class.java)

@@ -228,10 +228,15 @@ class BodypackService : Service() {
                 .setTransferMode(AudioTrack.MODE_STREAM).setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .setBufferSizeInBytes(max(minimum,1920)).build()
             val burst = getSystemService(AudioManager::class.java).getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull() ?: 240
-            out.setBufferSizeInFrames(max(480,burst*2)); track=out; out.play()
+            out.setBufferSizeInFrames(max(480,burst*2)); track=out
+            // AudioTrack accepts an entire hardware buffer immediately on startup.
+            // Prime it with silence so this burst cannot consume future network packets.
+            val silence=ShortArray(out.bufferSizeInFrames*2)
+            out.write(silence,0,silence.size,AudioTrack.WRITE_BLOCKING);out.play()
             val buffer = ShortArray(480)
             var fade = 0f; var left = 0f; var right = 0f
             var wasMuted = false
+            var gaps = 0
             while (running.get() && !udp.isClosed) {
                 var data: ShortArray? = null
                 synchronized(ringLock) {
@@ -239,14 +244,14 @@ class BodypackService : Service() {
                     if (ready) {
                         if (latest-next>targetPackets+4) { skipped+=latest-next-targetPackets; next=latest-targetPackets; fade=0f }
                         val slot=(next%32).toInt()
-                        if (sequences[slot]==next) { data=ring[slot]; ring[slot]=null; sequences[slot]=-1 } else missing++
+                        if (sequences[slot]==next) { data=ring[slot]; ring[slot]=null; sequences[slot]=-1; gaps=0 } else { missing++;gaps++ }
                         next++
-                        if (SystemClock.elapsedRealtime()-lastPacket>100) { ready=false; next=-1; latest=-1; sequences.fill(-1); ring.fill(null) }
+                        if (gaps>=2 || SystemClock.elapsedRealtime()-lastPacket>100) { ready=false; next=-1; latest=-1; gaps=0; sequences.fill(-1); ring.fill(null) }
                     }
                 }
                 val mute = panic || !ready || data==null
                 // Drain old output on panic; software ramp to silence is <= 64 samples.
-                if (panic && !wasMuted) { out.pause(); out.flush(); out.play() }
+                if (panic && !wasMuted) { out.pause(); out.flush(); out.write(silence,0,silence.size,AudioTrack.WRITE_BLOCKING);out.play() }
                 wasMuted=panic
                 for (i in 0 until 240) {
                     fade=(fade+if(mute)-1f/64 else 1f/64).coerceIn(0f,1f)

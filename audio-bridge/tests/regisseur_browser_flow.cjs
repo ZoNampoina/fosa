@@ -80,7 +80,7 @@ async function main(){
     // Changing the selected hardware releases the old track and requires activation again.
     await page.locator('.net-nav [data-view=live]').click();
     const source=page.locator('[data-panel=live] .microphone-input');
-    const deviceId=await source.locator('option').evaluateAll(options=>options.find(o=>o.value)?.value);
+    const deviceId=await source.locator('option').evaluateAll(options=>options.find(o=>o.value&&!o.value.startsWith('mr18:'))?.value);
     assert.ok(deviceId);await source.selectOption(deviceId);
     await page.waitForFunction(()=>window.testMicrophones.at(-1).getTracks().every(t=>t.readyState==='ended')&&document.querySelector('#liveTalk').disabled);
     assert.equal(await page.locator('#liveTalk').isDisabled(),true);
@@ -98,6 +98,14 @@ async function main(){
     await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('Micro refusé'));
     assert.equal(await page.locator('#liveTalk').isDisabled(),true);
     await page.locator('#liveEnableMic').click();await page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled);
+    // MR18 talk source uses server capture and does not open another PC microphone.
+    const acquired=await page.evaluate(()=>window.testMicrophones.length);
+    await source.selectOption('mr18:0');await page.locator('#liveEnableMic').click();
+    await page.waitForFunction(()=>!document.querySelector('#liveTalk').disabled);
+    assert.equal(await page.evaluate(()=>window.testMicrophones.length),acquired);
+    await page.locator('#liveTalkTarget').selectOption('all');
+    await press(page);await signal(pcm.page,true);await signal(opus.page,true);await signal(page,false);
+    await release(page);await signal(pcm.page,false);await signal(opus.page,false);
     await page.locator('#stopPcTalk').click();
     await page.reload();await page.locator('#pcRegisseur').waitFor({state:'visible'});
     await page.waitForFunction(()=>!document.querySelector('#liveEnableMic').disabled);

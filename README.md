@@ -1,3 +1,16 @@
+# FOSA Bodypack 0.10
+
+Monitoring personnel MR18 USB/ASIO → PC → LAN → Android / navigateur. La version précédente est conservée ; le nouveau moteur ajoute Monitor Gain, limiteur et master indépendant.
+
+- **PC :** extraire le dépôt puis lancer `FOSA-SERVER.cmd`.
+- **Android :** [installer FOSA-Android.apk](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk), détecter le PC ou saisir son IP et son code.
+- **Premier essai :** [guide court PC / téléphone / MR18](audio-bridge/BODYPACK.md).
+- **Fonctionnement, transports, tests et limites :** [architecture Bodypack](audio-bridge/ARCHITECTURE-BODYPACK.md).
+
+Le chemin audio est implémenté ; la latence physique avec la MR18 et le téléphone reste à mesurer. Capture 48 kHz dans cette version. Le navigateur et l’ancien mode FOSA restent disponibles ci-dessous.
+
+---
+
 # FOSA
 
 FOSA est un intercom/talkback temps réel pour musiciens.

@@ -13,3 +13,5 @@ button,input,select,.card,.channel,.metric,.qr-box,.phone-microphone{border-radi
 .musician .net-nav [data-view=live]{font-size:0}.musician .net-nav [data-view=live]:after{content:"TALK";font-size:11px}
 
 .channel-name details{grid-column:1/-1;margin:0;color:var(--muted);font-size:11px}.channel-name details[open]{display:grid;grid-template-columns:1fr 1fr;gap:8px}.channel-name details summary{grid-column:1/-1;margin:4px 0}.channel-name details label{font-size:11px}#matrix th input[type=number]{max-width:90px;min-height:32px;padding:4px;font-size:12px}#matrix th label{font-size:11px;margin:5px 0}
+
+.musician .safety-bar{position:sticky;top:0;z-index:16;background:var(--bg);padding:8px 0}.musician .net-nav [data-view=mix]{order:-1}.safety-bar strong{overflow-wrap:anywhere}.safety-bar>div{min-width:0}.musician .health-strip b{overflow-wrap:anywhere}

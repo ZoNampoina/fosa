@@ -39,6 +39,24 @@ async function main(){
       assert.ok((await item.page.locator('#diagnostics').textContent()).includes('NON MESURÉE'));
       await item.page.screenshot({path:output+'/pcm-'+item.credentials.id+'.png',fullPage:true});
     }
+    // Real Bodypack gain reaches decoded PCM; panic is local even without its RPC.
+    await a.page.locator('.net-nav [data-view=mix]').click();
+    const rms=()=>a.page.evaluate(()=>{const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);return Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length)});
+    await a.page.waitForFunction(()=>document.querySelector('[data-pan="0"]').value==='-100'&&document.querySelector('[data-gain="2"]').value==='0');
+    const before=await rms();assert.ok(before>.001);
+    await a.page.locator('#monitorGain').evaluate(el=>{el.value='6';el.dispatchEvent(new Event('input',{bubbles:true}))});
+    await a.page.waitForFunction(before=>{const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);return Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length)>before*1.6},before);
+    const boosted=(await admin('state')).users.find(p=>p.id===a.credentials.id);
+    assert.equal(boosted.mix.monitorGainDb,6);assert.equal(boosted.mix.master,.5);
+    assert.ok(boosted.levels.outputPeakDb>boosted.levels.mixPeakDb-1);
+    await a.page.screenshot({path:output+'/bodypack-personal-mix.png',fullPage:true});
+    await a.page.locator('#lockMix').click();assert.equal(await a.page.locator('#monitorGain').isDisabled(),true);
+    await a.page.evaluate(()=>{const ch=window.testChannels.find(c=>c.label==='fosa-control'),send=ch.send.bind(ch);window.restorePanicRpc=()=>ch.send=send;ch.send=value=>{try{if(JSON.parse(value).path==='panic')return}catch{}send(value)}});
+    await a.page.locator('#panicMute').click();await signal(a.page,false);await signal(b.page,true);
+    assert.equal((await admin('state')).users.find(p=>p.id===a.credentials.id).mix.muteAll,false,'Local panic must not need server acknowledgement');
+    await a.page.evaluate(()=>window.restorePanicRpc());await a.page.locator('#releasePanic').click();await signal(a.page,true);
+    await a.page.locator('#lockMix').click();
+    await a.page.locator('#monitorGain').evaluate(el=>{el.value='0';el.dispatchEvent(new Event('input',{bubbles:true}))});
     // Matrix restrictions affect PCM too, and leave the other mix audible.
     const allowed=Array(18).fill(true);allowed[2]=false;
     await admin('matrix',{id:b.credentials.id,allowed});await signal(b.page,false);await signal(a.page,true);

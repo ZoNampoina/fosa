@@ -10,9 +10,9 @@ if not exist ".venv\Scripts\python.exe" (
   py -3 -m venv .venv
   if errorlevel 1 exit /b 1
 )
-if not exist ".venv\fosa-deps-v094.ok" (
+if not exist ".venv\fosa-deps-v0100.ok" (
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 exit /b 1
-  type nul > ".venv\fosa-deps-v094.ok"
+  type nul > ".venv\fosa-deps-v0100.ok"
 )
 exit /b 0

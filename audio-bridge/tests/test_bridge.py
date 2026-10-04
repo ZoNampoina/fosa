@@ -33,6 +33,61 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.tmp.cleanup()
 
+    async def test_bodypack_limits_permissions_and_locked_panic(self):
+        p=self.bridge.saved['profiles'][self.pid]
+        r=await self.client.post('/api/matrix',headers=self.admin,json={'id':self.pid,
+            'limits':{'gainMaxDb':6,'masterMax':.7,'moreMeMaxDb':3},'permissions':{'pan':False}})
+        self.assertEqual(r.status,200)
+        mix=json.loads(json.dumps(p['mix'])) | {'monitorGainDb':12,'master':1}
+        mix['channels'][0]['pan']=1
+        r=await self.client.post('/api/mix',headers=self.auth,json={'mix':mix})
+        applied=(await r.json())['mix']
+        self.assertEqual(applied['monitorGainDb'],6)
+        self.assertEqual(applied['master'],.7)
+        # The API cannot bypass a pan permission, even if a client ignores disabled UI.
+        self.assertEqual(applied['channels'][0]['pan'],0)
+        await self.client.post('/api/matrix',headers=self.admin,json={'id':self.pid,'locked':True})
+        self.assertEqual((await self.client.post('/api/panic',headers=self.auth,json={'active':True})).status,200)
+        self.assertTrue(p['mix']['muteAll'])
+        self.assertEqual((await self.client.post('/api/panic',headers=self.auth,json={'active':False})).status,403)
+        self.assertEqual((await self.client.post('/api/more-me',headers=self.auth,json={'db':6})).status,403)
+        saved=json.loads(self.bridge.file.read_text())
+        self.assertTrue(saved['profiles'][self.pid]['mix']['muteAll'])
+        self.assertFalse(self.bridge.panic)
+        await self.client.post('/api/panic',headers=self.admin,json={'active':True})
+        self.assertTrue(self.bridge.panic)
+
+    async def test_preset_and_native_api_never_share_private_credentials(self):
+        self.assertEqual((await self.client.post('/api/native',headers=self.admin,json={})).status,403)
+        self.assertEqual((await self.client.get('/api/presets',headers=self.auth)).status,401)
+        self.assertEqual((await self.client.post('/api/presets',headers=self.admin,json={'name':'Rehearsal','action':'save'})).status,200)
+        self.assertNotIn(self.joined['token'],json.dumps(self.bridge.saved['presets']))
+        self.bridge.saved['profiles'][self.pid]['mix']['monitorGainDb']=9
+        await self.client.post('/api/presets',headers=self.admin,json={'name':'Rehearsal','action':'load'})
+        self.assertEqual(self.bridge.saved['profiles'][self.pid]['mix']['monitorGainDb'],0)
+        r=await self.client.post('/api/native',headers=self.auth,json={})
+        self.assertEqual(r.status,200)
+        native=await r.json()
+        self.assertEqual(native['sampleRate'],48000)
+        self.assertNotEqual(native['receiveKey'],native['sendKey'])
+        self.assertEqual(len(native['receiveKey']),64)
+        state=await (await self.client.get('/api/state',headers=self.auth)).json()
+        self.assertNotIn(native['receiveKey'],json.dumps(state))
+        self.assertEqual(state['profile']['monitoringEngine'],'native')
+        advice=await (await self.client.get('/api/auto-level',headers=self.auth)).json()
+        self.assertFalse(advice['available'])
+
+    async def test_more_me_and_revocation_of_active_solo(self):
+        p=self.bridge.saved['profiles'][self.pid]
+        p['mix']['mainChannel']=2
+        r=await self.client.post('/api/more-me',headers=self.auth,json={'db':3})
+        m=(await r.json())['mix']
+        self.assertAlmostEqual(m['channels'][2]['gain'],.5*10**(.15))
+        self.assertEqual(m['channels'][0]['gain'],.5)
+        p['mix']['channels'][2]['solo']=True
+        await self.client.post('/api/matrix',headers=self.admin,json={'id':self.pid,'permissions':{'solo':False}})
+        self.assertFalse(any(c['solo'] for c in p['mix']['channels']))
+
     async def test_real_disconnected_status_and_authorization(self):
         response=await self.client.get('/api/state')
         self.assertEqual(response.status,401)
