@@ -19,7 +19,7 @@ async function fixture(localHttps=false) {
 }
 async function musician(browser, url, name, role, device={},engine='opus') {
   const context=await browser.newContext({...device,permissions:['microphone'],serviceWorkers:'block'});
-  const allowed=new Set(['network.html','network.js','network.css','network-relay.js','network-relay-config.json','fosa-icon.svg','low-latency.js','low-latency-worklet.js']);
+  const allowed=new Set(['network.html','network.js','network.css','bodypack.css','network-relay.js','network-relay-config.json','fosa-icon.svg','low-latency.js','low-latency-worklet.js']);
   await context.route('https://zonampoina.github.io/fosa/musicians/**/*',route=>{
     const name=basename(new URL(route.request().url()).pathname);
     if(!allowed.has(name))return route.abort();

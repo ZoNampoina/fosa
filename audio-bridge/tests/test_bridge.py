@@ -243,6 +243,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 payload=await asyncio.wait_for(queue.get(),2)
                 samples=np.frombuffer(payload[24:],'<i2').reshape(240,2)
                 if samples.any():break  # Already in-flight source-absent keepalive packets.
+            # The first block contains the anti-click transition from the old pan/master.
+            self.bridge.capture(data,240,None,None)
+            payload=await asyncio.wait_for(queue.get(),2)
+            samples=np.frombuffer(payload[24:],'<i2').reshape(240,2)
             self.assertLess(np.max(np.abs(samples[:,0])),2)
             self.assertGreater(np.mean(samples[:,1]),6000)
             p['allowed'][2]=False

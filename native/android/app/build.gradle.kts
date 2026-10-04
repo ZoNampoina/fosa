@@ -4,7 +4,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     namespace = "com.arizona.fosa"
     compileSdk = 35
-    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "0.8.0" }
+    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 10; versionName = "0.10.0" }
 }
 dependencies {
     implementation("com.google.android.gms:play-services-nearby:19.3.0")

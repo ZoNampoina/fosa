@@ -5,3 +5,4 @@ numpy>=2.2,<3
 psutil>=7,<8
 qrcode>=8,<9
 cryptography>=45
+zeroconf>=0.140,<1

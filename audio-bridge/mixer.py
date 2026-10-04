@@ -13,32 +13,35 @@ def number(value, default, low, high):
     except (TypeError, ValueError):
         return default
 
-def default_mix():
-    return {"master": 0.5, "muteAll": False, "ducking": -6,
+def default_mix(channels=CHANNELS):
+    return {"master": 0.5, "muteAll": False, "ducking": -6, "monitorGainDb": 0., "mono": False, "mainChannel": 0,
             "channels": [{"gain": 0.5, "pan": 0, "mute": False, "solo": False}
-                         for _ in range(CHANNELS)]}
+                         for _ in range(channels)]}
 
-def clean_mix(value):
+def clean_mix(value, channels=CHANNELS):
     if not isinstance(value, dict):
         raise ValueError("Mix invalide")
     rows = value.get("channels")
-    if not isinstance(rows, list) or len(rows) != CHANNELS:
-        raise ValueError("Le mix doit contenir exactement 18 canaux")
-    out = default_mix()
+    if not isinstance(rows, list) or len(rows) != channels:
+        raise ValueError(f"Le mix doit contenir exactement {channels} canaux")
+    out = default_mix(channels)
     out["master"] = number(value.get("master"), .5, 0, 1)
+    out["monitorGainDb"] = number(value.get("monitorGainDb"), 0, 0, 12)
+    out["mono"] = value.get("mono") is True
+    out["mainChannel"] = int(number(value.get("mainChannel"), 0, 0, channels-1))
     out["muteAll"] = value.get("muteAll") is True
     out["ducking"] = value.get("ducking") if value.get("ducking") in (0, -3, -6, -12, -99) else -6
     out["channels"] = [{"gain": number(c.get("gain"), .5, 0, 1),
                         "pan": number(c.get("pan"), 0, -1, 1),
                         "mute": c.get("mute") is True,
                         "solo": c.get("solo") is True} for c in rows if isinstance(c, dict)]
-    if len(out["channels"]) != CHANNELS:
+    if len(out["channels"]) != channels:
         raise ValueError("Canal invalide")
     return out
 
 def gains(mix, allowed=None, talk=False):
-    solo = any(c["solo"] for c in mix["channels"])
-    matrix = np.zeros((CHANNELS, 2), dtype=np.float32)
+    solo = any(c["solo"] and (allowed is None or allowed[i]) for i, c in enumerate(mix["channels"]))
+    matrix = np.zeros((len(mix["channels"]), 2), dtype=np.float32)
     if mix["muteAll"]:
         return matrix
     duck = (0 if mix["ducking"] == -99 else 10 ** (mix["ducking"] / 20)) if talk else 1
