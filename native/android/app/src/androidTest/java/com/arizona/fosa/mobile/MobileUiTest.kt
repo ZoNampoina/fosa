@@ -40,7 +40,13 @@ class MobileUiTest {
         assertTrue("Actual native AudioTrack must be active",MobileService.state.optBoolean("audioPlayback"))
         peer!!.talk(false)
         ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-        ui.activityRule.scenario.onActivity{it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE};ui.waitForIdle();Thread.sleep(700);shot("09-landscape")
+        ui.activityRule.scenario.onActivity{it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE};ui.waitForIdle();Thread.sleep(700)
+        val navTop=ui.onNodeWithTag("nav-TALK").fetchSemanticsNode().boundsInRoot.top
+        for(tag in listOf("talk-button","panic-button")){
+            val bounds=ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            assertTrue("$tag must be fully accessible above navigation in landscape",bounds.top>=0f&&bounds.bottom<=navTop)
+        }
+        shot("09-landscape")
         ctx.stopService(Intent(ctx,MobileService::class.java))
     }
     @After fun stop(){peer?.close();ui.activity.stopService(Intent(ui.activity,MobileService::class.java))}

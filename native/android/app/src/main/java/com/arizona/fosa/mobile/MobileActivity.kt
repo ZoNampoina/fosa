@@ -82,17 +82,35 @@ class MobileActivity:ComponentActivity(){
         }
     }}
     @Composable private fun Talk(s:JSONObject){val peers=members(s);BoxWithConstraints(Modifier.fillMaxSize()){
-        val wide=maxWidth>600.dp
+        val wide=maxWidth>600.dp||maxWidth>maxHeight*1.4f
+        val compact=wide&&maxHeight<420.dp
+        val target=s.optString("target")
+        val label=when{target.startsWith("user:")->peers.find{it.optString("id")==target.removePrefix("user:")}?.optString("name") ?: "Member";target.startsWith("group:")->target.removePrefix("group:");else->target.uppercase()}
+        val chooseTarget:(String)->Unit={t->when(t){"USER"->modal="users";"GROUP"->modal="groups";else->MobileService.instance?.target(t.lowercase())}}
+        val panic:@Composable ()->Unit={FosaButton(if(s.optBoolean("muted"))"UNMUTE" else "PANIC MUTE",Modifier.fillMaxWidth().testTag("panic-button"),secondary=!s.optBoolean("muted")){MobileService.instance?.panic(!s.optBoolean("muted"))}}
         val controls:@Composable ()->Unit={Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(16.dp)){
-            FosaLabel("TALK TO");Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)){listOf("ALL","GROUP","LEADER","USER").forEach{t->FosaButton(t,Modifier.weight(1f),secondary=true,compact=true,enabled=t!="LEADER"||!s.optBoolean("host")){when(t){"USER"->modal="users";"GROUP"->modal="groups";else->MobileService.instance?.target(t.lowercase())}}}}
-            val label=when{ s.optString("target").startsWith("user:")->peers.find{it.optString("id")==s.optString("target").removePrefix("user:")}?.optString("name") ?: "Member";s.optString("target").startsWith("group:")->s.optString("target").removePrefix("group:");else->s.optString("target").uppercase() };Text(label,color=MaterialTheme.colorScheme.primary,fontWeight=FontWeight.Bold)
+            FosaLabel("TALK TO");Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)){listOf("ALL","GROUP","LEADER","USER").forEach{t->FosaButton(t,Modifier.weight(1f),secondary=true,compact=true,enabled=t!="LEADER"||!s.optBoolean("host")){chooseTarget(t)}}}
+            Text(label,color=MaterialTheme.colorScheme.primary,fontWeight=FontWeight.Bold)
             FosaTalkButton(s.optBoolean("talk"),s.optBoolean("mic")&&s.optBoolean("controlConnected")&&!s.optBoolean("muted")&&hasAudioPeer(s),{MobileService.instance?.push(it)},Modifier.widthIn(max=280.dp).fillMaxWidth(.8f))
             FosaMeter(if(s.optBoolean("talk"))s.optDouble("level").takeIf{it.isFinite()} else null,Modifier.widthIn(max=300.dp));FosaLabel(if(s.optBoolean("talk"))"MIC INPUT · MEASURED" else "HOLD TO TRANSMIT")
             if(!s.optBoolean("mic"))FosaButton("ENABLE MICROPHONE"){askMic()}
-            FosaButton(if(s.optBoolean("muted"))"UNMUTE" else "PANIC MUTE",Modifier.fillMaxWidth(),secondary=!s.optBoolean("muted")){MobileService.instance?.panic(!s.optBoolean("muted"))}
+            panic()
         }}
-        val details:@Composable ()->Unit={Column(verticalArrangement=Arrangement.spacedBy(16.dp)){FosaLabel(s.optString("sessionName"));Text("${s.optString("name")} — ${s.optString("role")}",style=MaterialTheme.typography.headlineLarge);Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){FosaStatus(if(s.optBoolean("controlConnected"))"LOCAL" else "RECONNECTING",s.optBoolean("controlConnected"));FosaLabel("${peers.size} MEMBERS")};if(!performance&&wide)FosaPanel{FosaLabel("AUDIO OUTPUT");Text(s.optString("output"));FosaLabel("AUDIO LATENCY · UNKNOWN");Text("End-to-end measurement required",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};if(!wide)Text(s.optString("output"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant);peers.filter{it.optBoolean("talk")&&it.optString("id")!=s.optString("id")}.take(if(wide)8 else 1).forEach{u->FosaChannel(u.optString("name"),u.optString("role"),true,u.optDouble("level").takeIf{it.isFinite()}){}}}}
-        if(wide)Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(24.dp)){Box(Modifier.weight(1f)){details()};Box(Modifier.weight(1f)){controls()}} else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(20.dp)){details();controls();Spacer(Modifier.height(12.dp))}
+        val details:@Composable ()->Unit={Column(verticalArrangement=Arrangement.spacedBy(if(compact)8.dp else 16.dp)){FosaLabel(s.optString("sessionName"));Text("${s.optString("name")} — ${s.optString("role")}",style=if(compact)MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineLarge);Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){FosaStatus(if(s.optBoolean("controlConnected"))"LOCAL" else "RECONNECTING",s.optBoolean("controlConnected"));FosaLabel("${peers.size} MEMBERS")};if(!performance&&wide&&!compact)FosaPanel{FosaLabel("AUDIO OUTPUT");Text(s.optString("output"));FosaLabel("AUDIO LATENCY · UNKNOWN");Text("End-to-end measurement required",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};if(!wide||compact)Text(s.optString("output"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant);if(compact&&!s.optBoolean("mic"))FosaButton("ENABLE MICROPHONE"){askMic()};peers.filter{it.optBoolean("talk")&&it.optString("id")!=s.optString("id")}.take(if(compact)1 else if(wide)8 else 1).forEach{u->if(compact)FosaStatus("${u.optString("name")} · TALKING") else FosaChannel(u.optString("name"),u.optString("role"),true,u.optDouble("level").takeIf{it.isFinite()}){}}}}
+        if(compact)Row(Modifier.fillMaxSize(),horizontalArrangement=Arrangement.spacedBy(16.dp),verticalAlignment=Alignment.CenterVertically){
+            Box(Modifier.weight(.65f).fillMaxHeight().verticalScroll(rememberScrollState())){details()}
+            Row(Modifier.weight(1.35f),horizontalArrangement=Arrangement.spacedBy(16.dp),verticalAlignment=Alignment.CenterVertically){
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    FosaLabel("TALK TO · $label")
+                    listOf(listOf("ALL","GROUP"),listOf("LEADER","USER")).forEach{row->Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){row.forEach{t->FosaButton(t,Modifier.weight(1f),secondary=true,compact=true,enabled=t!="LEADER"||!s.optBoolean("host")){chooseTarget(t)}}}}
+                    panic()
+                }
+                Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    FosaTalkButton(s.optBoolean("talk"),s.optBoolean("mic")&&s.optBoolean("controlConnected")&&!s.optBoolean("muted")&&hasAudioPeer(s),{MobileService.instance?.push(it)},Modifier.size(180.dp))
+                    FosaMeter(if(s.optBoolean("talk"))s.optDouble("level").takeIf{it.isFinite()} else null,Modifier.width(180.dp))
+                }
+            }
+        }else if(wide)Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(24.dp)){Box(Modifier.weight(1f)){details()};Box(Modifier.weight(1f)){controls()}} else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(20.dp)){details();controls();Spacer(Modifier.height(12.dp))}
     }}
     private fun hasAudioPeer(s:JSONObject):Boolean{val a=s.optJSONArray("metrics") ?: return false;return (0 until a.length()).any{a.getJSONObject(it).optBoolean("connected")}}
     private fun members(s:JSONObject):List<JSONObject>{val a=s.optJSONArray("members") ?: return emptyList();return (0 until a.length()).map{a.getJSONObject(it)}}
