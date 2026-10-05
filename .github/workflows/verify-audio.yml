@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,9 @@ jobs:
           if($errors.Count){$errors | Format-List; exit 1}
           python -c "import sys; sys.path.insert(0,'audio-bridge'); from lan import discover; print(discover())"
   browser:
-    runs-on: ubuntu-latest
+    # Separate hosted image after ubuntu-latest jobs failed runner acquisition.
+    # Browser userspace remains the pinned Playwright Noble container.
+    runs-on: ubuntu-22.04
     timeout-minutes: 12
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
