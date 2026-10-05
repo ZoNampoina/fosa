@@ -22,7 +22,7 @@ export class WebLanClient {
   async offerTo(id){const l=this.make(id);if(!l.channel)this.wire(l,l.pc.createDataChannel('fosa-mobile'));await l.pc.setLocalDescription(await l.pc.createOffer());await this.signal(id,'offer',{type:'offer',sdp:lanSdp(l.pc.localDescription.sdp)});}
   async receive({from,type,data}){if(type==='reset'){this.remove(from);this.make(from);if(this.profile.id<from)await this.offerTo(from);return;}const l=this.make(from);
     if(type==='ice'){if(!lanCandidate(data.candidate))return;if(l.remote)await l.pc.addIceCandidate(data);else l.ice.push(data);return;}
-    if(!['offer','answer'].includes(type))return;await l.pc.setRemoteDescription({type,sdp:lanSdp(data.sdp)});l.remote=true;for(const c of l.ice)await l.pc.addIceCandidate(c);l.ice=[];
+    if(!['offer','answer'].includes(type))return;if(type==='answer'&&l.pc.signalingState==='stable')return;await l.pc.setRemoteDescription({type,sdp:lanSdp(data.sdp)});l.remote=true;for(const c of l.ice)await l.pc.addIceCandidate(c);l.ice=[];
     if(type==='offer'){await l.pc.setLocalDescription(await l.pc.createAnswer());await this.signal(from,'answer',{type:'answer',sdp:lanSdp(l.pc.localDescription.sdp)});}
   }
   async poll(){if(this.polling||!this.profile)return;this.polling=true;try{this.measureMic();const q=await this.api('poll',{after:this.ack,talk:this.talking,target:this.target,level:this.talking?this.level:null});this.members=q.members;this.sessionName=q.sessionName;this.error='';

@@ -17,6 +17,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val rpc:(String,JSONObject)->JSONObject) {
     data class Link(val pc:PeerConnection,val track:AudioTrack?,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
     val links=ConcurrentHashMap<String,Link>()
+    @Volatile var error="";private set
     var roster=emptyList<JSONObject>()
     @Volatile var talking=false;private set
     @Volatile var target="all"
@@ -31,6 +32,16 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
         adm=JavaAudioDeviceModule.builder(ctx).setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setSampleRate(48000)
+            .setAudioRecordErrorCallback(object:JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordInitError(message:String){error="Microphone indisponible : $message";push(false);changed()}
+                override fun onWebRtcAudioRecordStartError(code:JavaAudioDeviceModule.AudioRecordStartErrorCode,message:String){error="Microphone arrêté : $message";push(false);changed()}
+                override fun onWebRtcAudioRecordError(message:String){error="Capture perdue : $message";push(false);changed()}
+            })
+            .setAudioTrackErrorCallback(object:JavaAudioDeviceModule.AudioTrackErrorCallback {
+                override fun onWebRtcAudioTrackInitError(message:String){error="Sortie audio indisponible : $message";changed()}
+                override fun onWebRtcAudioTrackStartError(code:JavaAudioDeviceModule.AudioTrackStartErrorCode,message:String){error="Sortie audio arrêtée : $message";changed()}
+                override fun onWebRtcAudioTrackError(message:String){error="Sortie audio perdue : $message";changed()}
+            })
             .setUseStereoInput(false).setUseStereoOutput(false).setUseLowLatency(true).setEnableVolumeLogger(false)
             .setUseHardwareAcousticEchoCanceler(JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
             .setUseHardwareNoiseSuppressor(JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
@@ -40,7 +51,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
         source=if(mic)factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))}) else null
     }
-    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null;links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
+    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty();links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
     @Synchronized fun volume(value:Double){master=value.coerceIn(0.0,1.0);links.values.forEach{it.received?.setVolume(master)}}
@@ -96,6 +107,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         val l=make(id)
         if(type=="ice") {val value=data.optString("candidate");if(!LanAddress.candidate(value))return;val c=IceCandidate(data.optString("sdpMid"),data.optInt("sdpMLineIndex"),value);if(l.remote)l.pc.addIceCandidate(c) else l.pending.add(c);return}
         if(type !in listOf("offer","answer"))return
+        if(type=="answer"&&l.pc.signalingState()==PeerConnection.SignalingState.STABLE)return
         val s=SessionDescription(if(type=="offer")SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,LanAddress.sdp(data.getString("sdp")))
         l.pc.setRemoteDescription(observer(done={synchronized(this){l.remote=true;l.pending.forEach{l.pc.addIceCandidate(it)};l.pending.clear()};if(type=="offer")l.pc.createAnswer(observer(created={publish(id,"answer",it)}),MediaConstraints())}),s)
     }
