@@ -61,7 +61,7 @@ class MobileActivity:ComponentActivity(){
                 "invite"->{Text("Invite a member",style=MaterialTheme.typography.titleLarge);Qr(s.optString("join"));FosaLabel("SESSION CODE");Text(s.optString("code"),style=MaterialTheme.typography.displayLarge,fontFamily=FontFamily.Monospace);Text("Scanner avec la caméra Android, puis ouvrir FOSA. Garde ce code privé.")}
                 "pair"->{Text("Pair a Web fallback",style=MaterialTheme.typography.titleLarge);Text("Sur la PWA, crée une invitation Web. Scanne son QR avec la caméra de ce téléphone, puis ouvre le lien FOSA.");if(s.optString("answer").isNotBlank()){Qr(s.getString("answer"));FosaLabel("ANSWER · à scanner depuis la PWA ouverte");val clipboard=LocalClipboardManager.current;FosaButton("COPY ANSWER"){clipboard.setText(androidx.compose.ui.text.AnnotatedString(s.getString("answer")))}}}
                 else->{Text("Advanced diagnostics",style=MaterialTheme.typography.titleLarge);Text("${s.optString("address")}\nFOSA-LAN/1 · Opus 48 kHz · SRTP\nAucun STUN / TURN\n8 membres maximum\nLatence audio : UNKNOWN");Text("Le RTT mesure un aller-retour réseau. Il ne mesure pas la latence microphone → casque.")}
-            };Spacer(Modifier.height(24.dp))}}
+            };FosaButton("CLOSE",Modifier.fillMaxWidth(),secondary=true){modal=""};Spacer(Modifier.height(24.dp))}}
     }
     @Composable private fun Home(){Column(verticalArrangement=Arrangement.spacedBy(20.dp)){
         Spacer(Modifier.height(8.dp));FosaLabel("PRIVATE NETWORK INTERCOM");Text("Your stage.\nYour connection.",style=MaterialTheme.typography.headlineLarge);Text("Parlez sur votre réseau local.\nSans PC. Sans compte cloud.",color=MaterialTheme.colorScheme.onSurfaceVariant)

@@ -25,9 +25,9 @@ class MobileUiTest {
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
         shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
         ui.onNodeWithTag("nav-SETTINGS").performClick();shot("07-settings");ui.onNodeWithText("OFFLINE PACKAGE").performScrollTo().performClick();shot("08-offline");ui.onNodeWithText("CHECK OFFLINE READY").performClick();ui.onNodeWithText("APP SHELL · AUDIO · UI · ICONS READY").assertExists()
-        ui.activityRule.scenario.onActivity{it.onBackPressedDispatcher.onBackPressed()};ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center);up()};assertFalse(MobileService.state.optBoolean("talk"))
+        ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center);up()};assertFalse(MobileService.state.optBoolean("talk"))
         val before=MobileService.state.optString("phase");ui.activityRule.scenario.onActivity{it.moveTaskToBack(true)};Thread.sleep(1800);assertNotNull(MobileService.instance);assertEquals(before,MobileService.state.optString("phase"))
-        ui.activityRule.scenario.onActivity{it.startActivity(Intent(it,MobileActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))}
+        inst.uiAutomation.executeShellCommand("am start -n ${ctx.packageName}/.mobile.MobileActivity").close();Thread.sleep(600)
         ui.activityRule.scenario.onActivity{it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE};ui.waitForIdle();Thread.sleep(700);shot("09-landscape")
         ctx.stopService(Intent(ctx,MobileService::class.java))
     }
