@@ -16,6 +16,8 @@
 4. Dans **MIX**, régler les canaux, le pan, MONITOR GAIN et MASTER. La notification **FOSA MONITORING ACTIVE** reste accessible écran verrouillé : MUTE / OPEN / STOP.
 5. Pour parler : le PC autorise le micro dans **LIVE / TALK** ou **MATRIX**. Sur le téléphone : **ACTIVER MON MICRO**, accepter Android, maintenir TALK. La lecture reste indépendante du micro.
 
+L’APK fourni est une version de test signée par la compilation GitHub. Si Android refuse sa mise à jour pour signature incompatible, désinstaller l’ancienne app puis installer cet APK et rejoindre à nouveau la session.
+
 ## Premier essai MR18
 
 1. Baisser le volume physique du téléphone/casque. Brancher un micro sur CH1 ; vérifier le routage USB **Input 1 → CH1**, pas une copie du Main L/R.

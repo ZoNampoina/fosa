@@ -109,9 +109,9 @@ class BodypackActivity : Activity() {
         nsd?.discoverServices("_fosa._tcp.",NsdManager.PROTOCOL_DNS_SD,discovery)
     }
     inner class NativeAudio {
-        @JavascriptInterface fun start(server:String,token:String):Boolean {
+        @JavascriptInterface fun start(server:String,token:String,targetMs:Int):Boolean {
             if(server!=origin || token.isBlank())return false
-            runOnUiThread { startForegroundService(Intent(this@BodypackActivity,BodypackService::class.java).setAction("START").putExtra("server",server).putExtra("token",token)) }
+            runOnUiThread { startForegroundService(Intent(this@BodypackActivity,BodypackService::class.java).setAction("START").putExtra("server",server).putExtra("token",token).putExtra("targetMs",targetMs.coerceIn(5,40))) }
             return true
         }
         @JavascriptInterface fun stop() { runOnUiThread { stopService(Intent(this@BodypackActivity,BodypackService::class.java)) } }

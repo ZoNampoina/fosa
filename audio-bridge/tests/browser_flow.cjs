@@ -48,6 +48,7 @@ async function main(){
  const f=await fixture();let chrome,safari;
  try{
   chrome=await chromium.launch({args:['--no-sandbox','--no-proxy-server']});
+  await require('./native_control_browser.cjs')(chrome,f.url);
   const adminContext=await chrome.newContext(),consolePage=await adminContext.newPage();
   const consoleErrors=[];consolePage.on('pageerror',e=>consoleErrors.push(e.message));
   await consolePage.goto(f.console);

@@ -16,7 +16,7 @@ class FosaPcmProcessor extends AudioWorkletProcessor {
     this.counters = {received:0,late:0,duplicate:0,invalid:0,missing:0,underrunFrames:0,skipped:0,rebuffer:0};
     this.queueMs = null;
     this.lastLeft = 0; this.lastRight = 0;
-    this.fade = 0;
+    this.fade = 0;this.missingRun=0;
     this.configure(options.processorOptions?.targetMs);
     this.port.onmessage = e => {
       if(e.data instanceof ArrayBuffer)this.receive(e.data);
@@ -30,7 +30,7 @@ class FosaPcmProcessor extends AudioWorkletProcessor {
   reset() {
     for(const slot of this.slots)slot.sequence=null;
     this.sequence=null;this.latest=null;this.position=0;this.started=false;
-    this.lastLeft=0;this.lastRight=0;this.fade=0;this.lastArrival=-Infinity;
+    this.lastLeft=0;this.lastRight=0;this.fade=0;this.missingRun=0;this.lastArrival=-Infinity;
   }
   distance(a,b){return (a-b)|0;} // Sequence wrap is valid for <2^31 packets.
   receive(buffer) {
@@ -77,13 +77,20 @@ class FosaPcmProcessor extends AudioWorkletProcessor {
       if(this.started) {
         const slot=this.slots[this.sequence%32],index=Math.floor(this.position),frac=this.position-index;
         if(slot.sequence===this.sequence) {
+          if(this.missingRun){this.fade=64;this.missingRun=0;}
           const next=index===239?this.slots[((this.sequence+1)>>>0)%32]:slot;
           const nextIndex=index===239?0:index+1;
           const nextValid=index!==239||next.sequence===((this.sequence+1)>>>0);
           const a=slot.pcm[index*2]/32768,b=slot.pcm[index*2+1]/32768;
           l=a+(nextValid?next.pcm[nextIndex*2]/32768-a:0)*frac;
           r=b+(nextValid?next.pcm[nextIndex*2+1]/32768-b:0)*frac;
-        } else {this.counters.underrunFrames++;}
+        } else {
+          this.counters.underrunFrames++;this.missingRun++;
+          // At most 64 samples of fade, never loop old music after a lost packet.
+          const remain=Math.max(0,64-this.missingRun);
+          const fade=remain/(remain+1);
+          l=this.lastLeft*fade;r=this.lastRight*fade;
+        }
         if(this.fade>0){const f=1-this.fade/64;l=this.lastLeft*(1-f)+l*f;r=this.lastRight*(1-f)+r*f;this.fade--;}
         this.lastLeft=l;this.lastRight=r;
         this.position+=step;

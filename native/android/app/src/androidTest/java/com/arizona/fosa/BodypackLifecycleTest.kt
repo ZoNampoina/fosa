@@ -77,9 +77,10 @@ class BodypackLifecycleTest {
         }.apply{start()}
         val scenario=ActivityScenario.launch(BodypackActivity::class.java)
         try {
-            scenario.onActivity { it.startForegroundService(Intent(it,BodypackService::class.java).setAction("START").putExtra("server","http://127.0.0.1:${server.localPort}").putExtra("token","test-token")) }
+            scenario.onActivity { it.startForegroundService(Intent(it,BodypackService::class.java).setAction("START").putExtra("server","http://127.0.0.1:${server.localPort}").putExtra("token","test-token").putExtra("targetMs",20)) }
             await("Native packets must reach an actual AudioTrack") { val s=BodypackService.instance?.status();s?.optBoolean("playback")==true && s.optLong("packets")>30 }
             val service=BodypackService.instance!!
+            assertEquals("Receive target must survive initial service creation",4,service.targetPackets)
             scenario.onActivity { service.armMic() }
             await("Native microphone should arm") { service.micArmed }
             service.talk=true

@@ -52,4 +52,10 @@ for(const rate of [44100,48000,96000]){
   const f=fixture();f.feed(0);f.feed(1);f.process(480);f.feed(3);f.feed(4);f.process(480);
   assert.equal(f.p.counters.missing,1);assert.ok(f.p.counters.underrunFrames>=239);
 }
+{
+  const f=fixture();f.feed(0);f.feed(1);const previous=f.process(480)[0].at(-1);f.feed(3);f.feed(4);
+  const lost=f.process(480)[0];assert.ok(Math.abs(lost[0]-previous)<.01,'loss begins with a fade');
+  assert.ok(Math.abs(lost[120])<1e-6,'lost packet cannot repeat old audio');
+  assert.ok(lost.every(Number.isFinite));
+}
 console.log('PASS: PCM worklet stereo, reorder, wrap, loss, backlog bound, stale flush and device rate conversion.');

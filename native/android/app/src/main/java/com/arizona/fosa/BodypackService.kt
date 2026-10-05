@@ -79,6 +79,7 @@ class BodypackService : Service() {
                 if (running.get()) return START_NOT_STICKY
                 server = intent.getStringExtra("server") ?: return START_NOT_STICKY
                 token = intent.getStringExtra("token") ?: return START_NOT_STICKY
+                targetPackets = (intent.getIntExtra("targetMs",10)/5).coerceIn(1,8)
                 foreground(false)
                 panic = false; error = ""; running.set(true)
                 val am = getSystemService(AudioManager::class.java)

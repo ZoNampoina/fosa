@@ -59,6 +59,7 @@ Le service `mediaPlayback|microphone` est démarré depuis l’app visible. La p
 - GitHub Actions Windows et Linux : mêmes tests Python, contrôles JS et pare-feu Windows.
 - Playwright Chromium/WebKit : vrais flux décodés, deux mixes indépendants, Talkback autorisé/révoqué, destinations, reprise, PCM+Opus, vues PC/téléphone/tablette. Les sources et micros sont des fixtures de test, pas du matériel MR18.
 - Android : compilation APK et test instrumenté sur émulateur API 35, avec serveur UDP chiffré de test, AudioTrack, AudioRecord, service en arrière-plan et Panic. Un émulateur ne valide ni le driver MR18 ni la latence matérielle du téléphone.
+- Interface native : test navigateur des appels `FosaAndroid`, connexion authentifiée, modification du vrai mix serveur, Panic local, buffer initial et diagnostics. Le pont Android est simulé dans ce test d’interface ; la lecture audio native est couverte séparément par le test sur émulateur.
 
 ## Références techniques
 
