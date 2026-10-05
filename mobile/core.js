@@ -33,7 +33,7 @@ export class WebLanClient {
   }catch(e){this.error=e.message;this.push(false);this.changed();}finally{this.polling=false;}}
   measureMic(){if(!this.analyser)return;const a=new Float32Array(this.analyser.fftSize);this.analyser.getFloatTimeDomainData(a);this.level=Math.max(-120,20*Math.log10(Math.max(1e-6,Math.sqrt(a.reduce((s,v)=>s+v*v,0)/a.length))));}
   eligible(id){const m=this.members.find(m=>m.id===id);return this.target==='all'||this.target==='user:'+id||this.target==='leader'&&m?.leader||this.target==='group:'+m?.group;}
-  push(active){this.talking=!!active&&!this.muted&&!!this.microphone;if(this.talking){clearTimeout(this.safety);this.safety=setTimeout(()=>this.push(false),30000);}for(const [id,l] of this.links)if(l.track)l.track.enabled=this.talking&&this.eligible(id);this.changed();}
+  push(active){this.talking=!!active&&!this.muted&&!!this.microphone&&[...this.links].some(([id,l])=>l.pc.connectionState==='connected'&&this.eligible(id));if(this.talking){clearTimeout(this.safety);this.safety=setTimeout(()=>this.push(false),30000);}for(const [id,l] of this.links)if(l.track)l.track.enabled=this.talking&&this.eligible(id);this.changed();}
   destination(target){this.push(false);this.target=target;this.changed();}
   panic(active){this.muted=active;if(active)this.push(false);for(const l of this.links.values())if(l.audio)l.audio.muted=active||this.mutes.has([...this.links].find(([,v])=>v===l)?.[0]);this.changed();}
   volume(value){this.master=Math.max(0,Math.min(1,value));for(const l of this.links.values())if(l.audio)l.audio.volume=this.master;}

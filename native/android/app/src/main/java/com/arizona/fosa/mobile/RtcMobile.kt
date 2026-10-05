@@ -51,7 +51,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
         source=if(mic)factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))}) else null
     }
-    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty();links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
+    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty()&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
     @Synchronized fun volume(value:Double){master=value.coerceIn(0.0,1.0);links.values.forEach{it.received?.setVolume(master)}}
