@@ -10,35 +10,34 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.*
 import android.webkit.*
-import android.widget.*
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.arizona.fosa.mobile.*
+import androidx.core.view.WindowCompat
 import org.json.JSONObject
 import java.net.URI
 
 /** Shared LAN control UI with a deliberately small, origin-restricted native audio API. */
-class BodypackActivity : Activity() {
+class BodypackActivity : ComponentActivity() {
     private lateinit var web: WebView
-    private lateinit var address: EditText
-    private lateinit var status: TextView
-    private lateinit var devices: LinearLayout
+    private var serverAddress by mutableStateOf("")
+    private var message by mutableStateOf("Même LAN que le PC · écouteurs filaires / USB-C")
+    private val devices=mutableStateListOf<Pair<String,String>>()
+    private var controls by mutableStateOf(true)
     private var origin = ""
     private var discovery: NsdManager.DiscoveryListener? = null
     private var nsd: NsdManager? = null
     private val prefs by lazy { getSharedPreferences("bodypack",MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor=Color.rgb(10,13,16); window.navigationBarColor=Color.rgb(10,13,16)
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(10,13,16)); setPadding(12,8,12,0) }
-        val title=TextView(this).apply { text="FOSA  /  BODYPACK"; textSize=23f; setTextColor(Color.rgb(224,245,235)); setPadding(8,8,8,8) }
-        root.addView(title)
-        address=EditText(this).apply { hint="IP du PC ou lien QR LAN"; setSingleLine(); setTextColor(Color.WHITE); setHintTextColor(Color.GRAY); setText(prefs.getString("server","")) }
-        root.addView(address)
-        val actions=LinearLayout(this)
-        val actionHeight=(48*resources.displayMetrics.density).toInt()
-        actions.addView(Button(this).apply { text="CONNECT"; setOnClickListener { open(address.text.toString()) } },LinearLayout.LayoutParams(0,actionHeight,1f))
-        actions.addView(Button(this).apply { text="DETECT LAN"; setOnClickListener { discover() } },LinearLayout.LayoutParams(0,actionHeight,1f))
-        root.addView(actions)
-        status=TextView(this).apply { setTextColor(Color.LTGRAY); text="Même LAN que le PC • USB-C / écouteurs filaires"; setPadding(8,4,8,4) }; root.addView(status)
-        devices=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(devices)
+        WindowCompat.setDecorFitsSystemWindows(window,false)
+        serverAddress=prefs.getString("server","") ?: ""
         web=WebView(this).apply {
             setBackgroundColor(Color.rgb(10,13,16)); settings.javaScriptEnabled=true; settings.domStorageEnabled=true
             settings.allowFileAccess=false; settings.allowContentAccess=false; settings.mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW
@@ -46,18 +45,35 @@ class BodypackActivity : Activity() {
             webViewClient=object:WebViewClient() {
                 override fun shouldOverrideUrlLoading(view:WebView, request:WebResourceRequest):Boolean {
                     if(request.url.toString().startsWith("$origin/"))return false
-                    status.text="Lien externe : ${request.url.host ?: "adresse bloquée"}"
+                    message="Lien externe : ${request.url.host ?: "adresse bloquée"}"
                     return true
                 }
                 override fun onReceivedError(view:WebView, request:WebResourceRequest, error:WebResourceError) {
-                    if(request.isForMainFrame)status.text="Serveur inaccessible. Vérifie IP, Wi-Fi et pare-feu du PC."
+                    if(request.isForMainFrame)message="Serveur inaccessible. Vérifie IP, Wi-Fi et pare-feu du PC."
                 }
             }
         }
-        root.addView(web,LinearLayout.LayoutParams(-1,0,1f)); setContentView(root)
+        setContent { FosaTheme { Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=16.dp)) {
+            FosaAppBar("BODYPACK","MR18 / PC")
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                FosaButton("‹ MOBILE",Modifier.weight(1f),secondary=true){ finish() }
+                FosaButton("CONNECTION",Modifier.weight(1f),secondary=true){controls=!controls}
+            }
+            if(controls)FosaPanel(Modifier.padding(vertical=12.dp)) {
+                FosaLabel("FOSA STAGE SERVER")
+                OutlinedTextField(serverAddress,{serverAddress=it},label={Text("PC address / QR link")},singleLine=true,modifier=Modifier.fillMaxWidth(),shape=FosaRadius.Control)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    FosaButton("CONNECT",Modifier.weight(1f)){open(serverAddress)}
+                    FosaButton("DETECT LAN",Modifier.weight(1f),secondary=true){discover()}
+                }
+                Text(message,style=MaterialTheme.typography.bodySmall)
+                devices.forEach{(name,url)->FosaButton(name,Modifier.fillMaxWidth(),secondary=true){open(url)}}
+            }
+            AndroidView(factory={web},modifier=Modifier.weight(1f).fillMaxWidth())
+        } } }
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),10)
-        if(intent?.data!=null)open(intent.data.toString()) else if(address.text.isNotBlank())open(address.text.toString()) else discover()
+        if(intent?.data!=null)open(intent.data.toString()) else if(serverAddress.isNotBlank())open(serverAddress) else discover()
     }
     override fun onNewIntent(intent:Intent) { super.onNewIntent(intent); setIntent(intent); intent.data?.let{open(it.toString())} }
     private fun open(value:String) {
@@ -78,20 +94,20 @@ class BodypackActivity : Activity() {
             val port=if(uri.port<0)8765 else uri.port
             val next="${uri.scheme}://$host:$port"
             if(origin.isNotEmpty() && origin!=next)stopService(Intent(this,BodypackService::class.java))
-            origin=next; address.setText(origin); prefs.edit().putString("server",origin).apply()
+            origin=next; serverAddress=origin; prefs.edit().putString("server",origin).apply()
             val fragment=uri.rawFragment?.let { "#$it" } ?: ""
             web.loadUrl("$origin/network.html?musician=1&native=1$fragment")
-            devices.removeAllViews(); status.text="LAN • $host • PCM natif en arrière-plan"
-        } catch(e:Exception) { status.text=e.message ?: "Adresse invalide" }
+            controls=false; devices.clear(); message="LAN • $host • PCM natif en arrière-plan"
+        } catch(e:Exception) { message=e.message ?: "Adresse invalide" }
     }
     private fun discover() {
         if(discovery!=null)return
         nsd=getSystemService(NsdManager::class.java)
-        devices.removeAllViews(); status.text="Recherche FOSA STAGE… IP manuelle disponible si multicast bloqué."
+        devices.clear(); message="Recherche FOSA STAGE… IP manuelle disponible si multicast bloqué."
         discovery=object:NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(type:String){}
             override fun onDiscoveryStopped(type:String){ discovery=null }
-            override fun onStartDiscoveryFailed(type:String,code:Int){ runOnUiThread{status.text="Détection indisponible ($code). Utilise l’IP du PC."}; discovery=null }
+            override fun onStartDiscoveryFailed(type:String,code:Int){ runOnUiThread{message="Détection indisponible ($code). Utilise l’IP du PC."}; discovery=null }
             override fun onStopDiscoveryFailed(type:String,code:Int){ discovery=null }
             override fun onServiceLost(info:NsdServiceInfo){}
             override fun onServiceFound(info:NsdServiceInfo) {
@@ -101,8 +117,8 @@ class BodypackActivity : Activity() {
                     override fun onServiceResolved(service:NsdServiceInfo) { runOnUiThread {
                         val ip=service.host?.hostAddress ?: return@runOnUiThread
                         if(ip.contains(':'))return@runOnUiThread
-                        devices.addView(Button(this@BodypackActivity).apply { text="${service.serviceName} · $ip"; setOnClickListener { open("http://$ip:${service.port}") } })
-                        status.text="Serveur détecté par mDNS. Touche son nom pour connecter."
+                        val item=service.serviceName to "http://$ip:${service.port}";if(item !in devices)devices.add(item)
+                        message="Serveur détecté par mDNS. Touche son nom pour connecter."
                     } }
                 })
             }
