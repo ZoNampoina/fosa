@@ -35,13 +35,13 @@ class LanSession(val name:String, val ownerName:String, val ownerRole:String, pr
             return ticket(uid)
         }
         val p=users.values.find{same(it.getString("token"),token)} ?: throw IllegalArgumentException("Session privée : reconnexion requise")
-        val uid=p.getString("id");p.put("seen",clock())
+        val uid=p.getString("id");p.put("seen",clock()).put("pairUntil",0)
         when(path) {
             "poll" -> {
                 p.put("talk",b.optBoolean("talk",false)).put("target",b.optString("target","all"))
                 val level=b.optDouble("level",Double.NaN);p.put("level",if(level.isFinite())level.coerceIn(-120.0,0.0) else JSONObject.NULL)
                 val ack=b.optLong("after",0);val queue=messages.getValue(uid);queue.removeAll{it.getLong("seq")<=ack}
-                val public=users.values.map{u->JSONObject().also{v->for(k in listOf("id","name","role","client","group","level","target"))v.put(k,u.opt(k));v.put("leader",u.getString("id")==owner).put("online",clock()-u.getLong("seen")<7000).put("talk",u.optBoolean("talk")&&clock()-u.getLong("seen")<1500)}}
+                val public=users.values.map{u->JSONObject().also{v->for(k in listOf("id","name","role","client","group","level","target"))v.put(k,u.opt(k));v.put("leader",u.getString("id")==owner).put("online",clock()-u.getLong("seen")<7000||clock()<u.optLong("pairUntil",0)).put("talk",u.optBoolean("talk")&&clock()-u.getLong("seen")<1500)}}
                 return JSONObject().put("session",id).put("sessionName",name).put("leader",owner).put("members",JSONArray(public)).put("signals",JSONArray(queue)).put("internetRequired",false)
             }
             "signal" -> {
@@ -57,5 +57,6 @@ class LanSession(val name:String, val ownerName:String, val ownerRole:String, pr
         }
         return JSONObject().put("ok",true)
     }
+    @Synchronized fun reservePair(uid:String){users.getValue(uid).put("pairUntil",clock()+90000)}
     @Synchronized fun touchOwner(talk:Boolean,target:String,level:Double?) { users.getValue(owner).put("seen",clock()).put("talk",talk).put("target",target).put("level",level ?: JSONObject.NULL) }
 }

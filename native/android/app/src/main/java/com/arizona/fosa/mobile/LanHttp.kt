@@ -6,8 +6,8 @@ import java.io.BufferedInputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Small bounded LAN signaling server. No assets, cloud, proxy or audio in HTTP. */
-class LanHttp(address:String, private val room:LanSession) {
-    private val socket=ServerSocket(0,16,InetAddress.getByName(address))
+class LanHttp(address:String, private val room:LanSession, bindPort:Int=0) {
+    private val socket=ServerSocket().apply{reuseAddress=true;bind(InetSocketAddress(InetAddress.getByName(address),bindPort),16)}
     val port=socket.localPort
     private val running=AtomicBoolean(true)
     private val pool=java.util.concurrent.ThreadPoolExecutor(2,4,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue(32))

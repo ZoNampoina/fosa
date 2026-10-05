@@ -23,6 +23,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Volatile var muted=false;private set
     @Volatile var level:Double?=null;private set
     private var master=0.75
+    private val memberMutes=ConcurrentHashMap<String,Boolean>()
     private var sampleTime=0L
     private val adm:JavaAudioDeviceModule
     private val factory:PeerConnectionFactory
@@ -43,7 +44,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
     @Synchronized fun volume(value:Double){master=value.coerceIn(0.0,1.0);links.values.forEach{it.received?.setVolume(master)}}
-    @Synchronized fun memberMute(id:String,active:Boolean){links[id]?.received?.setEnabled(!active)}
+    @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;links[id]?.received?.setEnabled(!active)}
     @Synchronized fun sync(members:List<JSONObject>) {
         roster=members
         val live=members.filter{it.optString("id")!=self&&it.optBoolean("online")}.map{it.getString("id")}.toSet()
@@ -69,7 +70,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             override fun onRemoveStream(s:MediaStream){}
             override fun onDataChannel(c:DataChannel){wire(id,c)}
             override fun onRenegotiationNeeded(){}
-            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){(r.track() as? AudioTrack)?.let{links[id]?.received=it;it.setVolume(master)}}
+            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){(r.track() as? AudioTrack)?.let{links[id]?.received=it;it.setVolume(master);it.setEnabled(memberMutes[id]!=true)}}
         }) ?: error("Audio WebRTC indisponible")
         val track=source?.let{factory.createAudioTrack("mic-$id",it).also{t->t.setEnabled(false);pc.addTrack(t,listOf("fosa"))}}
         if(track==null)pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))

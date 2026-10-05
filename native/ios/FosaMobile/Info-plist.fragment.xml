@@ -1,0 +1,6 @@
+<dict>
+<key>NSLocalNetworkUsageDescription</key><string>FOSA connects directly to your private local intercom session.</string>
+<key>NSMicrophoneUsageDescription</key><string>Your microphone is used while you hold Talk.</string>
+<key>NSBonjourServices</key><array><string>_fosa-mobile._tcp.</string></array>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>

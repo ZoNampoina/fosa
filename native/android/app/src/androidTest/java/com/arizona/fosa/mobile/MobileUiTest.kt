@@ -15,12 +15,12 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class MobileUiTest {
     @get:Rule val ui=createAndroidComposeRule<MobileActivity>()
-    private fun shot(name:String){ui.waitForIdle();val dir=File(ui.activity.getExternalFilesDir(null),"screenshots");dir.mkdirs();ui.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG,100,File(dir,"$name.png").outputStream().also{})}
+    private fun shot(name:String){ui.waitForIdle();val dir=File(ui.activity.getExternalFilesDir(null),"screenshots");dir.mkdirs();File(dir,"$name.png").outputStream().use{ui.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG,100,it)}}
     @Test fun premiumScreensRealHostAndBackground(){
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
-        shot("01-home");ui.onNodeWithTag("home-create").performClick();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performClick();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
+        shot("01-home");ui.onNodeWithTag("home-create").performClick();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
         shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
