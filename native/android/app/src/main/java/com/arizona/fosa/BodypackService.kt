@@ -205,6 +205,9 @@ class BodypackService : Service() {
             if (view.short.toInt()!=240 || view.get().toInt()!=2 || view.get().toInt()!=0 || view.int!=48000) { invalid++; continue }
             captureQueue = (view.int.toLong() and 0xffffffffL)/1000.0
             val pcm = ShortArray(480); view.asShortBuffer().get(pcm)
+            // Publish liveness before waking playback; otherwise the first valid
+            // block can be treated as stale while lastPacket is still zero.
+            lastPacket=SystemClock.elapsedRealtime()
             synchronized(ringLock) {
                 if (next>=0 && seq<next) { skipped++; return@synchronized }
                 val slot = (seq%32).toInt()
@@ -216,7 +219,7 @@ class BodypackService : Service() {
             }
             val now = SystemClock.elapsedRealtimeNanos()
             if (previousTime>0 && seq>previousSequence) jitter += (abs((now-previousTime)/1e6-(seq-previousSequence)*5)-jitter)/16
-            previousTime=now; previousSequence=seq; lastPacket=SystemClock.elapsedRealtime()
+            previousTime=now; previousSequence=seq
         } catch (_: SocketTimeoutException) { } catch (_: Exception) { invalid++ }
     }
     private fun play(udp: DatagramSocket) {

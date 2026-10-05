@@ -87,8 +87,15 @@ class BodypackLifecycleTest {
             await("Talkback UDP must remain concurrent with playback") { talkPackets.get()>5 && service.status().optBoolean("playback") }
             service.talk=false
             scenario.onActivity { it.moveTaskToBack(true) }
-            val before=service.status().getLong("packets");Thread.sleep(1600)
-            assertTrue("Background audio must keep receiving",service.status().getLong("packets")>before+100)
+            val before=service.status().getLong("packets")
+            println("FOSA before background check: ${service.status()}")
+            // The emulator's launcher transition can pause its host CPU. Verify
+            // continued service progress, not physical realtime scheduling here.
+            await("Background audio must keep receiving (baseline=$before)") {
+                val status=service.status()
+                status.getLong("packets")>before+100 && status.getBoolean("connected") && status.getBoolean("playback")
+            }
+            println("FOSA after background check: ${service.status()}")
             service.muteLocal(true)
             assertTrue(service.status().getBoolean("panic"));assertFalse(service.talk)
             assertTrue("Mute must preserve connection",service.status().getBoolean("playback"))
