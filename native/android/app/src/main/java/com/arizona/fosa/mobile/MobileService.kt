@@ -36,7 +36,7 @@ class MobileService:Service() {
     override fun onCreate(){super.onCreate();instance=this;getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("fosa-mobile","FOSA Mobile",NotificationManager.IMPORTANCE_LOW))}
     override fun onStartCommand(i:Intent?,flags:Int,id:Int):Int {
         when(i?.action){
-            "START"->{ foreground();work.execute{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }
+            "START"->{ foreground();enqueue{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }
             "TALK"->push(!(rtc?.talking ?: false),5000)
             "MUTE"->panic(!(rtc?.muted ?: false))
             "STOP"->stopSelf()
@@ -73,7 +73,8 @@ class MobileService:Service() {
         }
         rtc=newRtc();if(room==null)recoverDiscovery();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
     }
-    private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->work.execute{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
+    private fun enqueue(task:()->Unit){if(!work.isShutdown)try{work.execute{task()}}catch(_:RejectedExecutionException){}}
+    private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
         val host=room ?: throw IllegalArgumentException("Coordinateur indisponible")
         host.call(q.getString("path"),q.optJSONObject("body") ?: JSONObject(),host.ticket(id).getString("token"),"rtc:$id")
     })
@@ -105,16 +106,16 @@ class MobileService:Service() {
     fun panic(active:Boolean){rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
     fun volume(value:Double){rtc?.volume(value)}
     fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value)}
-    fun group(id:String,value:String){work.execute{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
-    fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();work.execute{rtc?.close();rtc=newRtc();manual.clear();publish()}}}
-    fun importWeb(value:String){work.execute{try{
+    fun group(id:String,value:String){enqueue{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
+    fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();enqueue{rtc?.close();rtc=newRtc();manual.clear();publish()}}}
+    fun importWeb(value:String){enqueue{try{
         val host=room ?: throw IllegalArgumentException("Ouvre ce lien sur le téléphone qui a créé la session.")
         val encoded=if(value.startsWith("fosa:"))Uri.parse(value).getQueryParameter("data") ?: "" else value.trim()
         val q=unpack(encoded);require(q.getString("type")=="offer"){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web fallback"),remote="web-pair");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
         // Gather host candidates into the answer; manual pairing cannot trickle before its channel opens.
-        main.postDelayed({work.execute{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt. Réessaie.")
+        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt. Réessaie.")
             pairAnswer="https://zonampoina.github.io/fosa/mobile/#answer="+pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
             publish()
         }catch(e:Exception){error=e.message ?: "Appairage impossible";publish()}}},3000)
@@ -135,7 +136,7 @@ class MobileService:Service() {
             override fun onServiceLost(i:NsdServiceInfo){}
             override fun onServiceFound(i:NsdServiceInfo){nsd.resolveService(i,object:NsdManager.ResolveListener{
                 override fun onResolveFailed(i:NsdServiceInfo,c:Int){}
-                override fun onServiceResolved(i:NsdServiceInfo){val sid=i.attributes["session"]?.toString(Charsets.UTF_8);val ip=i.host?.hostAddress ?: return;if(sid==profile.optString("session")&&LanAddress.privateV4(ip))work.execute{address="http://$ip:${i.port}";prefs.edit().putString("address",address).apply()}}
+                override fun onServiceResolved(i:NsdServiceInfo){val sid=i.attributes["session"]?.toString(Charsets.UTF_8);val ip=i.host?.hostAddress ?: return;if(sid==profile.optString("session")&&LanAddress.privateV4(ip))enqueue{address="http://$ip:${i.port}";prefs.edit().putString("address",address).apply()}}
             })}
         };nsd.discoverServices("_fosa-mobile._tcp.",NsdManager.PROTOCOL_DNS_SD,recovery)
     }
@@ -167,7 +168,7 @@ class MobileService:Service() {
         return Notification.Builder(this,"fosa-mobile").setSmallIcon(R.drawable.fosa_logo).setContentTitle("FOSA MOBILE · ${profile.optString("sessionName","Local")}")
             .setContentText(if(rtc?.talking==true)"TALK · arrêt automatique après 5 s" else "LAN · ${(session.optJSONArray("members")?.length() ?: 1)} membres · ${if(rtc?.muted==true)"MUTED" else "Écoute active"}")
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
-    fun disconnect(){push(false);panic(true);prefs.edit().clear().apply();work.execute{try{if(profile.has("token"))call("leave",JSONObject())}catch(_:Exception){};main.post{stopSelf()}}}
+    fun disconnect(){push(false);panic(true);prefs.edit().clear().apply();enqueue{try{if(profile.has("token"))call("leave",JSONObject())}catch(_:Exception){};main.post{stopSelf()}}}
     fun forget(){prefs.edit().clear().apply()}
     override fun onDestroy(){rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
     private fun pack(q:JSONObject):String {val out=java.io.ByteArrayOutputStream();DeflaterOutputStream(out).use{it.write(q.toString().toByteArray())};return Base64.encodeToString(out.toByteArray(),Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)}
