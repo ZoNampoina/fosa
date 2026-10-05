@@ -14,7 +14,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** Retain the actual Android platform splash briefly for its screenshot, only in this test. */
+/** Render the actual Android platform SplashScreenView, independent of launcher transition timing. */
 @RunWith(AndroidJUnit4::class)
 class StartupCaptureTest {
     @Test fun actualPlatformSplash(){
@@ -23,7 +23,15 @@ class StartupCaptureTest {
         val done=CountDownLatch(1);var failure:Throwable?=null
         val cb=object:Application.ActivityLifecycleCallbacks{
             override fun onActivityCreated(a:Activity,b:Bundle?){if(a is MobileActivity)a.splashScreen.setOnExitAnimationListener{screen->
-                Thread{try{Thread.sleep(100);android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/FOSA-screenshots")).use{it.readBytes()};android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/FOSA-screenshots/00-splash.png")).use{it.readBytes()}}catch(e:Throwable){failure=e}finally{Handler(Looper.getMainLooper()).post{screen.remove();done.countDown()}}}.start()
+                try {
+                    check(screen.width>0&&screen.height>0)
+                    val bitmap=Bitmap.createBitmap(screen.width,screen.height,Bitmap.Config.ARGB_8888)
+                    screen.draw(android.graphics.Canvas(bitmap))
+                    val values=android.content.ContentValues().apply{put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"00-splash.png");put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/png");put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/FOSA-screenshots")}
+                    val uri=ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values) ?: error("Capture storage unavailable")
+                    ctx.contentResolver.openOutputStream(uri)!!.use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+                }catch(e:Throwable){failure=e}finally{screen.remove();done.countDown()}
+
             }}
             override fun onActivityStarted(a:Activity){}
             override fun onActivityResumed(a:Activity){}

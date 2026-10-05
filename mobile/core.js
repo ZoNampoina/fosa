@@ -36,7 +36,7 @@ export class WebLanClient {
   push(active){this.talking=!!active&&!this.muted&&!!this.microphone&&[...this.links].some(([id,l])=>l.pc.connectionState==='connected'&&this.eligible(id));if(this.talking){clearTimeout(this.safety);this.safety=setTimeout(()=>this.push(false),30000);}for(const [id,l] of this.links)if(l.track)l.track.enabled=this.talking&&this.eligible(id);this.changed();}
   destination(target){this.push(false);this.target=target;this.changed();}
   panic(active){this.muted=active;if(active)this.push(false);for(const l of this.links.values())if(l.audio)l.audio.muted=active||this.mutes.has([...this.links].find(([,v])=>v===l)?.[0]);this.changed();}
-  volume(value){this.master=Math.max(0,Math.min(1,value));for(const l of this.links.values())if(l.audio)l.audio.volume=this.master;}
+  volume(value){this.master=Number.isFinite(value)?Math.max(0,Math.min(1,value)):0;for(const l of this.links.values())if(l.audio)l.audio.volume=this.master;}
   memberMute(id,active){active?this.mutes.add(id):this.mutes.delete(id);const l=this.links.get(id);if(l?.audio)l.audio.muted=active||this.muted;}
   async enableAudio(){await this.context?.resume();for(const l of this.links.values())if(l.audio)await l.audio.play();this.error='';this.changed();}
   async stats(){for(const l of this.links.values()){const report=await l.pc.getStats();const m={};for(const s of report.values()){if(s.type==='candidate-pair'&&s.state==='succeeded'&&s.currentRoundTripTime!=null)m.rttMs=s.currentRoundTripTime*1000;if(s.type==='inbound-rtp'&&s.kind==='audio'){if(s.jitter!=null)m.jitterMs=s.jitter*1000;if(s.packetsReceived+s.packetsLost>0)m.loss=100*Math.max(0,s.packetsLost)/(s.packetsReceived+s.packetsLost);}}l.metrics=m;}}

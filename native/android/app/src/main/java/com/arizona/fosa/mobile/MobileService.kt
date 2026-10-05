@@ -104,8 +104,8 @@ class MobileService:Service() {
     fun push(active:Boolean,ttl:Long=30000){talkUntil=SystemClock.elapsedRealtime()+ttl;rtc?.push(active);publish()}
     fun target(value:String){rtc?.let{it.push(false,value)};publish()}
     fun panic(active:Boolean){rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
-    fun volume(value:Double){rtc?.volume(value)}
-    fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value)}
+    fun volume(value:Double){rtc?.volume(value);publish()}
+    fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value);publish()}
     fun group(id:String,value:String){enqueue{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
     fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();enqueue{rtc?.close();rtc=newRtc();manual.clear();publish()}}}
     fun importWeb(value:String){enqueue{try{
@@ -158,7 +158,7 @@ class MobileService:Service() {
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
-            .put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
+            .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("local",LanAddress.ip(this)!=null).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
         main.post{if(instance===this)state=s}
     }

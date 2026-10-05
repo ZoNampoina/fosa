@@ -24,7 +24,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Volatile var target="all"
     @Volatile var muted=false;private set
     @Volatile var level:Double?=null;private set
-    private var master=0.75
+    @Volatile var master=0.75;private set
     private val memberMutes=ConcurrentHashMap<String,Boolean>()
     private var sampleTime=0L
     private val adm:JavaAudioDeviceModule
@@ -59,7 +59,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty()&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
-    @Synchronized fun volume(value:Double){master=value.coerceIn(0.0,1.0);links.values.forEach{it.received?.setVolume(master)}}
+    @Synchronized fun volume(value:Double){master=if(value.isFinite())value.coerceIn(0.0,1.0) else 0.0;links.values.forEach{it.received?.setVolume(master)}}
+    fun mutedMembers():List<String> = memberMutes.filter{it.value}.keys.toList()
     @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;links[id]?.received?.setEnabled(!active)}
     @Synchronized fun sync(members:List<JSONObject>) {
         roster=members
