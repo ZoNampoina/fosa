@@ -30,6 +30,7 @@ import android.graphics.Bitmap
 @OptIn(ExperimentalMaterial3Api::class)
 class MobileActivity:ComponentActivity(){
     private var route by mutableStateOf("home");private var tab by mutableStateOf("TALK")
+    private var startupVisible by mutableStateOf(true)
     private var name by mutableStateOf("ZO");private var role by mutableStateOf("SAX");private var sessionName by mutableStateOf("BAND LIVE")
     private var address by mutableStateOf("");private var code by mutableStateOf("");private var theme by mutableStateOf("DARK")
     private var haptic by mutableStateOf(true)
@@ -39,7 +40,8 @@ class MobileActivity:ComponentActivity(){
     private val permissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){MobileService.instance?.armMic()}
     override fun onCreate(b:Bundle?){super.onCreate(b);WindowCompat.setDecorFitsSystemWindows(window,false)
         val prefs=getSharedPreferences("mobile-ui",MODE_PRIVATE);name=prefs.getString("name","ZO") ?: "ZO";role=prefs.getString("role","SAX") ?: "SAX";theme=prefs.getString("theme","DARK") ?: "DARK"
-        setContent{FosaTheme(theme,haptic){MobileRoot()}};handle(intent);scan()
+        startupVisible=b==null&&MobileService.instance==null
+        setContent{FosaTheme(theme,haptic){if(startupVisible){FosaSplash();LaunchedEffect(Unit){kotlinx.coroutines.delay(FosaMotion.StartupMs);startupVisible=false}}else MobileRoot()}};handle(intent);scan()
     }
     override fun onNewIntent(i:Intent){super.onNewIntent(i);setIntent(i);handle(i)}
     private fun handle(i:Intent){i.data?.let{u->if(u.host=="mobile-pair")MobileService.instance?.importWeb(u.toString()) else if(u.host=="mobile"){address=u.getQueryParameter("address") ?: "";code=u.getQueryParameter("code") ?: "";route="join"};Unit}}

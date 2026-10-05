@@ -23,6 +23,7 @@ import android.util.Base64
 class MobileService:Service() {
     companion object { @Volatile var instance:MobileService?=null;var state by mutableStateOf(JSONObject().put("phase","idle"));private set }
     private val main=Handler(Looper.getMainLooper())
+    private val publication=java.util.concurrent.atomic.AtomicLong();private var appliedPublication=0L
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var rtc:RtcMobile?=null
     private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L
@@ -166,13 +167,14 @@ class MobileService:Service() {
             else->"Sortie système · route non mesurée"
         }
     }
-    private fun publish(){val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
+    private fun publish(){val version=publication.incrementAndGet();val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("local",LanAddress.ip(this)!=null).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
-        main.post{if(instance===this)state=s}
+        val apply={if(instance===this&&version>appliedPublication){appliedPublication=version;state=s}}
+        if(Looper.myLooper()==Looper.getMainLooper())apply()else main.post{apply()}
     }
     private fun fail(value:String){error=value;phase="Connexion impossible";publish()}
     private fun notification():Notification {val open=PendingIntent.getActivity(this,0,Intent(this,MobileActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

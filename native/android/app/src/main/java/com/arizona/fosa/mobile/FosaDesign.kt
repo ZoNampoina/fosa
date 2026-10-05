@@ -20,7 +20,7 @@ object FosaColors { val Background=Color(0xFF0D1218);val Surface=Color(0xFF161E2
 object FosaSpacing {val XS=4.dp;val S=8.dp;val M=12.dp;val L=16.dp;val XL=24.dp;val XXL=32.dp}
 object FosaRadius {val Panel=RoundedCornerShape(12.dp);val Control=RoundedCornerShape(8.dp)}
 object FosaElevation {val Flat=0.dp}
-object FosaMotion {const val MeterIntervalMs=150;const val PerformanceIntervalMs=500}
+object FosaMotion {const val MeterIntervalMs=150;const val PerformanceIntervalMs=500;const val StartupMs=420L}
 val LocalFosaHaptic=compositionLocalOf{true}
 val FosaTypography=Typography(
     displayLarge=androidx.compose.ui.text.TextStyle(fontSize=48.sp,fontWeight=FontWeight.Bold,letterSpacing=(-2).sp),
@@ -34,6 +34,10 @@ val FosaTypography=Typography(
         SideEffect{(view.context as? android.app.Activity)?.let{a->androidx.core.view.WindowCompat.getInsetsController(a.window,view).apply{isAppearanceLightStatusBars=!dark;isAppearanceLightNavigationBars=!dark}}}
         Surface(color=scheme.background,modifier=Modifier.fillMaxSize()){content()}}}}
 @Composable fun FosaLabel(text:String){Text(text.uppercase(),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+@Composable fun FosaSplash(){Column(Modifier.fillMaxSize().testTag("splash-screen").safeDrawingPadding(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){
+    Image(painterResource(R.drawable.fosa_logo),"FOSA",Modifier.size(112.dp));Spacer(Modifier.height(FosaSpacing.XL))
+    Text("FOSA",style=MaterialTheme.typography.displayLarge,letterSpacing=6.sp);Spacer(Modifier.height(FosaSpacing.M));FosaLabel("NETWORK AUDIO SYSTEM")
+}}
 @Composable fun FosaStatus(text:String,good:Boolean=true){Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)){Box(Modifier.size(6.dp).clip(CircleShape).background(if(good)MaterialTheme.colorScheme.primary else FosaColors.Warning));Text(text,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurface)}}
 @Composable fun FosaAppBar(product:String="MOBILE",status:String="LOCAL",good:Boolean=true){Row(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalAlignment=Alignment.CenterVertically){Image(painterResource(R.drawable.fosa_logo),"FOSA",Modifier.size(38.dp));Spacer(Modifier.width(10.dp));Column{Text("FOSA",style=MaterialTheme.typography.titleLarge,letterSpacing=2.sp);FosaLabel(product)};Spacer(Modifier.weight(1f));FosaStatus(status,good)}}
 @Composable fun FosaPanel(modifier:Modifier=Modifier,content:@Composable ColumnScope.()->Unit){Column(modifier.fillMaxWidth().clip(FosaRadius.Panel).background(MaterialTheme.colorScheme.surface).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)}
