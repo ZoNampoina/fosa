@@ -41,13 +41,23 @@ async function main(){
     }
     // Real Bodypack gain reaches decoded PCM; panic is local even without its RPC.
     await a.page.locator('.net-nav [data-view=mix]').click();
-    const rms=()=>a.page.evaluate(()=>{const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);return Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length)});
+    const rms=()=>a.page.evaluate(async()=>{
+      // Median across distinct audio windows rejects a transient rebuffer/fade.
+      const values=[];
+      for(let i=0;i<9;i++){
+        await new Promise(r=>setTimeout(r,100));
+        const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);
+        values.push(Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length));
+      }
+      return values.sort((a,b)=>a-b)[4];
+    });
     await a.page.waitForFunction(()=>document.querySelector('[data-pan="0"]').value==='-100'&&document.querySelector('[data-gain="2"]').value==='0');
     const before=await rms();assert.ok(before>.001);
     await a.page.locator('#monitorGain').evaluate(el=>{el.value='6';el.dispatchEvent(new Event('input',{bubbles:true}))});
-    await a.page.waitForFunction(before=>{const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);return Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length)>before*1.6},before);
+    await a.page.waitForFunction(()=>document.querySelector('#mixNotice').textContent.startsWith('Mix enregistré')&&document.querySelector('#monitorGain').value==='6');
     const boosted=(await admin('state')).users.find(p=>p.id===a.credentials.id);
     assert.equal(boosted.mix.monitorGainDb,6);assert.equal(boosted.mix.master,.5);
+    const after=await rms();assert.ok(after>before*1.6&&after<before*2.4,`+6 dB must approximately double decoded RMS: ${before} -> ${after}`);
     assert.ok(boosted.levels.outputPeakDb>boosted.levels.mixPeakDb-1);
     await a.page.screenshot({path:output+'/bodypack-personal-mix.png',fullPage:true});
     await a.page.locator('#lockMix').click();assert.equal(await a.page.locator('#monitorGain').isDisabled(),true);
