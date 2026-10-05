@@ -23,7 +23,7 @@ class StartupCaptureTest {
         val done=CountDownLatch(1);var failure:Throwable?=null
         val cb=object:Application.ActivityLifecycleCallbacks{
             override fun onActivityCreated(a:Activity,b:Bundle?){if(a is MobileActivity)a.splashScreen.setOnExitAnimationListener{screen->
-                Thread{try{Thread.sleep(100);val dir=File(ctx.getExternalFilesDir(null),"screenshots");dir.mkdirs();File(dir,"00-splash.png").outputStream().use{inst.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG,100,it)}}catch(e:Throwable){failure=e}finally{Handler(Looper.getMainLooper()).post{screen.remove();done.countDown()}}}.start()
+                Thread{try{Thread.sleep(100);android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/FOSA-screenshots")).use{it.readBytes()};android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/FOSA-screenshots/00-splash.png")).use{it.readBytes()}}catch(e:Throwable){failure=e}finally{Handler(Looper.getMainLooper()).post{screen.remove();done.countDown()}}}.start()
             }}
             override fun onActivityStarted(a:Activity){}
             override fun onActivityResumed(a:Activity){}

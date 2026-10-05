@@ -14,8 +14,10 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class MobileUiTest {
+    private var peer:NativePeerFixture?=null
     @get:Rule val ui=createAndroidComposeRule<MobileActivity>()
-    private fun shot(name:String){ui.waitForIdle();val dir=File(ui.activity.getExternalFilesDir(null),"screenshots");dir.mkdirs();File(dir,"$name.png").outputStream().use{InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG,100,it)}}
+    private fun shell(command:String){android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)).use{it.readBytes()}}
+    private fun shot(name:String){ui.waitForIdle();shell("mkdir -p /sdcard/Download/FOSA-screenshots");shell("screencap -p /sdcard/Download/FOSA-screenshots/$name.png")}
     @Test fun premiumScreensRealHostAndBackground(){
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
@@ -23,13 +25,23 @@ class MobileUiTest {
         shot("01-home");ui.onNodeWithTag("home-create").performClick();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
+        peer=NativePeerFixture(ctx,MobileService.state)
+        ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.let{a->(0 until a.length()).any{a.getJSONObject(it).optBoolean("connected")}}==true}
         shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
         ui.onNodeWithTag("nav-SETTINGS").performClick();shot("07-settings");ui.onNodeWithText("OFFLINE PACKAGE").performScrollTo().performClick();shot("08-offline");ui.onNodeWithText("CHECK OFFLINE READY").performClick();ui.onNodeWithText("APP SHELL · AUDIO · UI · ICONS READY").assertExists()
         ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center);up()};assertFalse(MobileService.state.optBoolean("talk"))
-        val before=MobileService.state.optString("phase");ui.activityRule.scenario.onActivity{it.moveTaskToBack(true)};Thread.sleep(1800);assertNotNull(MobileService.instance);assertEquals(before,MobileService.state.optString("phase"))
-        inst.uiAutomation.executeShellCommand("am start -n ${ctx.packageName}/.mobile.MobileActivity").close();Thread.sleep(600)
+        peer!!.talk(true)
+        ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.optJSONObject(0)?.optLong("packetsReceived",0)?.let{it>10L}==true}
+        val before=MobileService.state.getJSONArray("metrics").getJSONObject(0).optLong("packetsReceived")
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        Thread.sleep(2600);assertNotNull(MobileService.instance)
+        val after=MobileService.state.getJSONArray("metrics").getJSONObject(0).optLong("packetsReceived")
+        assertTrue("Native audio must keep arriving while the activity is stopped",after>before)
+        assertTrue("Actual native AudioTrack must be active",MobileService.state.optBoolean("audioPlayback"))
+        peer!!.talk(false)
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         ui.activityRule.scenario.onActivity{it.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE};ui.waitForIdle();Thread.sleep(700);shot("09-landscape")
         ctx.stopService(Intent(ctx,MobileService::class.java))
     }
-    @After fun stop(){ui.activity.stopService(Intent(ui.activity,MobileService::class.java))}
+    @After fun stop(){peer?.close();ui.activity.stopService(Intent(ui.activity,MobileService::class.java))}
 }

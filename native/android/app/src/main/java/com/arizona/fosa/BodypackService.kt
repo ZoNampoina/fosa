@@ -294,7 +294,10 @@ class BodypackService : Service() {
     }
     fun disableMic() { micArmed=false; talk=false; try { recorder?.stop() } catch(_:Exception){} }
     fun status(): JSONObject {
-        val t=track; val route=when(t?.routedDevice?.type) {
+        val t=track
+        // Native AudioTrack can be released concurrently by stream recovery.
+        val facts=try{t?.let{JSONObject().put("route",it.routedDevice?.type ?: -1).put("playing",it.playState==AudioTrack.PLAYSTATE_PLAYING).put("bufferMs",it.bufferSizeInFrames/48.0).put("underruns",it.underrunCount).put("low",it.performanceMode==AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)}}catch(_:IllegalStateException){null}
+        val route=when(facts?.optInt("route")) {
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES,AudioDeviceInfo.TYPE_WIRED_HEADSET -> "WIRED HEADPHONES"
             AudioDeviceInfo.TYPE_USB_DEVICE,AudioDeviceInfo.TYPE_USB_HEADSET,AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB AUDIO / DAC"
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,AudioDeviceInfo.TYPE_BLUETOOTH_SCO,AudioDeviceInfo.TYPE_BLE_HEADSET -> "BLUETOOTH — latence supplémentaire"
@@ -303,15 +306,15 @@ class BodypackService : Service() {
         }
         val depth=synchronized(ringLock) { if(ready)max(0,latest-next+1)*5 else 0 }
         val battery=registerReceiver(null,IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        return JSONObject().put("connected",connected).put("playback",t?.playState==AudioTrack.PLAYSTATE_PLAYING)
+        return JSONObject().put("connected",connected).put("playback",facts?.optBoolean("playing") ?: false)
             .put("error",error).put("panic",panic).put("mic",micArmed).put("talk",talk)
             .put("packets",received).put("missing",missing).put("invalid",invalid).put("skipped",skipped)
             .put("jitter",jitter).put("rtt",rtt ?: JSONObject.NULL).put("buffer",depth)
             .put("loss",if(received+missing>0)100.0*missing/(received+missing) else JSONObject.NULL)
             .put("network","LAN / UDP").put("output",route).put("audioLatency",JSONObject.NULL)
             .put("latencyMethod","UNKNOWN").put("captureQueueMs",captureQueue)
-            .put("outputBufferMs",(t?.bufferSizeInFrames ?: 0)/48.0).put("underruns",t?.underrunCount ?: 0)
-            .put("lowLatencyMode",t?.performanceMode==AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            .put("outputBufferMs",facts?.opt("bufferMs") ?: JSONObject.NULL).put("underruns",facts?.opt("underruns") ?: JSONObject.NULL)
+            .put("lowLatencyMode",facts?.opt("low") ?: JSONObject.NULL)
             .put("battery",battery?.getIntExtra(BatteryManager.EXTRA_LEVEL,-1) ?: -1)
     }
     override fun onDestroy() {

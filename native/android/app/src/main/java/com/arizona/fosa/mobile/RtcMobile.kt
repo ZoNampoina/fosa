@@ -18,6 +18,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     data class Link(val pc:PeerConnection,val track:AudioTrack?,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
     val links=ConcurrentHashMap<String,Link>()
     @Volatile var error="";private set
+    @Volatile var playing=false;private set
     var roster=emptyList<JSONObject>()
     @Volatile var talking=false;private set
     @Volatile var target="all"
@@ -36,6 +37,10 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
                 override fun onWebRtcAudioRecordInitError(message:String){error="Microphone indisponible : $message";push(false);changed()}
                 override fun onWebRtcAudioRecordStartError(code:JavaAudioDeviceModule.AudioRecordStartErrorCode,message:String){error="Microphone arrêté : $message";push(false);changed()}
                 override fun onWebRtcAudioRecordError(message:String){error="Capture perdue : $message";push(false);changed()}
+            })
+            .setAudioTrackStateCallback(object:JavaAudioDeviceModule.AudioTrackStateCallback {
+                override fun onWebRtcAudioTrackStart(){playing=true}
+                override fun onWebRtcAudioTrackStop(){playing=false}
             })
             .setAudioTrackErrorCallback(object:JavaAudioDeviceModule.AudioTrackErrorCallback {
                 override fun onWebRtcAudioTrackInitError(message:String){error="Sortie audio indisponible : $message";changed()}
@@ -113,7 +118,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     }
     @Synchronized fun stats(){links.values.forEach{l->l.pc.getStats { report->val out=JSONObject();report.statsMap.values.forEach{s->val m=s.members
         if(s.type=="candidate-pair"&&m["state"]=="succeeded"&&m["currentRoundTripTime"] is Number)out.put("rttMs",(m["currentRoundTripTime"] as Number).toDouble()*1000)
-        if(s.type=="inbound-rtp"&&m["kind"]=="audio"){(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
+        if(s.type=="inbound-rtp"&&m["kind"]=="audio"){(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
     };l.stats=out;changed() }}}
     @Synchronized fun reset(){push(false);links.keys.toList().forEach{remove(it)}}
     @Synchronized private fun remove(id:String){links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
