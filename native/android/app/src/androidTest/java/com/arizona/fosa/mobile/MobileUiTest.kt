@@ -17,12 +17,12 @@ class MobileUiTest {
     private var peer:NativePeerFixture?=null
     @get:Rule val ui=createAndroidComposeRule<MobileActivity>()
     private fun shell(command:String){android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)).use{it.readBytes()}}
-    private fun shot(name:String){ui.waitForIdle();shell("mkdir -p /sdcard/Download/FOSA-screenshots");shell("screencap -p /sdcard/Download/FOSA-screenshots/$name.png")}
+    private fun shot(name:String){ui.waitForIdle();Thread.sleep(300);shell("mkdir -p /sdcard/Download/FOSA-screenshots");shell("screencap -p /sdcard/Download/FOSA-screenshots/$name.png")}
     @Test fun premiumScreensRealHostAndBackground(){
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
-        shot("01-home");ui.onNodeWithTag("home-create").performClick();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
+        shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Find your\nconnection.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
         peer=NativePeerFixture(ctx,MobileService.state)

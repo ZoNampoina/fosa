@@ -14,7 +14,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** Render the actual Android platform SplashScreenView, independent of launcher transition timing. */
+/** Hold the actual platform splash long enough to capture its hardware-rendered icon. */
 @RunWith(AndroidJUnit4::class)
 class StartupCaptureTest {
     @Test fun actualPlatformSplash(){
@@ -23,14 +23,22 @@ class StartupCaptureTest {
         val done=CountDownLatch(1);var failure:Throwable?=null
         val cb=object:Application.ActivityLifecycleCallbacks{
             override fun onActivityCreated(a:Activity,b:Bundle?){if(a is MobileActivity)a.splashScreen.setOnExitAnimationListener{screen->
-                try {
-                    check(screen.width>0&&screen.height>0)
-                    val bitmap=Bitmap.createBitmap(screen.width,screen.height,Bitmap.Config.ARGB_8888)
-                    screen.draw(android.graphics.Canvas(bitmap))
-                    val values=android.content.ContentValues().apply{put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"00-splash.png");put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/png");put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/FOSA-screenshots")}
-                    val uri=ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values) ?: error("Capture storage unavailable")
-                    ctx.contentResolver.openOutputStream(uri)!!.use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
-                }catch(e:Throwable){failure=e}finally{screen.remove();done.countDown()}
+                Thread {
+                    try {
+                        // Canvas.draw omits the icon's SurfaceView. Capture the real compositor instead.
+                        Thread.sleep(300)
+                        val bitmap=inst.uiAutomation.takeScreenshot() ?: error("Display capture unavailable")
+                        val logoVisible=(bitmap.width/4 until bitmap.width*3/4 step 8).any{x->
+                            (bitmap.height/4 until bitmap.height*3/4 step 8).any{y->
+                                val p=bitmap.getPixel(x,y);android.graphics.Color.green(p)>100&&android.graphics.Color.green(p)>android.graphics.Color.red(p)*1.3
+                            }
+                        }
+                        check(logoVisible){"Actual splash logo must be visible, not a blank background"}
+                        val values=android.content.ContentValues().apply{put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"00-splash.png");put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/png");put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/FOSA-screenshots")}
+                        val uri=ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values) ?: error("Capture storage unavailable")
+                        ctx.contentResolver.openOutputStream(uri)!!.use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+                    }catch(e:Throwable){failure=e}finally{a.runOnUiThread{screen.remove();done.countDown()}}
+                }.start()
 
             }}
             override fun onActivityStarted(a:Activity){}
