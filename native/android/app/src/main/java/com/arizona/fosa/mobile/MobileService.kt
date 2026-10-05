@@ -5,6 +5,7 @@ import android.app.*
 import android.content.*
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.*
@@ -25,6 +26,8 @@ class MobileService:Service() {
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var rtc:RtcMobile?=null
     private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L
+    private var routeWarning="";private var hadWired=false
+    private val routes=object:AudioDeviceCallback(){override fun onAudioDevicesAdded(d:Array<out AudioDeviceInfo>){routeAudio()};override fun onAudioDevicesRemoved(d:Array<out AudioDeviceInfo>){routeAudio()}}
     private var error="";private var phase="idle";private var lastPoll=0L;private var mic=false
     private var registration:NsdManager.RegistrationListener?=null
     private var recovery:NsdManager.DiscoveryListener?=null
@@ -33,7 +36,7 @@ class MobileService:Service() {
     private val prefs by lazy{getSharedPreferences("mobile-session",MODE_PRIVATE)}
     private val audio by lazy{getSystemService(AudioManager::class.java)}
     override fun onBind(i:Intent?):IBinder?=null
-    override fun onCreate(){super.onCreate();instance=this;getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("fosa-mobile","FOSA Mobile",NotificationManager.IMPORTANCE_LOW))}
+    override fun onCreate(){super.onCreate();instance=this;audio.registerAudioDeviceCallback(routes,main);getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("fosa-mobile","FOSA Mobile",NotificationManager.IMPORTANCE_LOW))}
     override fun onStartCommand(i:Intent?,flags:Int,id:Int):Int {
         when(i?.action){
             "START"->{ foreground();enqueue{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }
@@ -71,7 +74,7 @@ class MobileService:Service() {
             else request("join",JSONObject().put("code",i.getStringExtra("code")).put("name",i.getStringExtra("name")).put("role",i.getStringExtra("role")).put("client","Native Android"))
             prefs.edit().putString("address",address).putString("profile",profile.toString()).apply()
         }
-        rtc=newRtc();if(room==null)recoverDiscovery();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
+        rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
     }
     private fun enqueue(task:()->Unit){if(!work.isShutdown)try{work.execute{task()}}catch(_:RejectedExecutionException){}}
     private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
@@ -103,7 +106,7 @@ class MobileService:Service() {
     }catch(e:Exception){rtc?.push(false);phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish()}}
     fun push(active:Boolean,ttl:Long=30000){talkUntil=SystemClock.elapsedRealtime()+ttl;rtc?.push(active);publish()}
     fun target(value:String){rtc?.let{it.push(false,value)};publish()}
-    fun panic(active:Boolean){rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
+    fun panic(active:Boolean){if(!active)routeWarning="";rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
     fun volume(value:Double){rtc?.volume(value);publish()}
     fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value);publish()}
     fun group(id:String,value:String){enqueue{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
@@ -142,6 +145,15 @@ class MobileService:Service() {
     }
     private fun unadvertise(){registration?.let{try{getSystemService(NsdManager::class.java).unregisterService(it)}catch(_:Exception){}};registration=null}
     fun joinLink():String="fosa://mobile?address=${Uri.encode(address)}&code=${room?.code ?: ""}&session=${room?.id ?: ""}"
+    @Suppress("DEPRECATION") private fun routeAudio(){
+        if(instance!==this||rtc==null)return
+        val types=listOf(AudioDeviceInfo.TYPE_WIRED_HEADPHONES,AudioDeviceInfo.TYPE_WIRED_HEADSET,AudioDeviceInfo.TYPE_USB_HEADSET,AudioDeviceInfo.TYPE_USB_DEVICE)
+        val wired=audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any{it.type in types}
+        if(hadWired&&!wired){rtc?.panic(true);routeWarning="Écouteurs débranchés : mute local. Vérifie la sortie avant UNMUTE."}
+        hadWired=wired
+        try{if(Build.VERSION.SDK_INT>=31){val devices=audio.availableCommunicationDevices;val chosen=devices.firstOrNull{it.type in types} ?: devices.firstOrNull{it.type==AudioDeviceInfo.TYPE_BUILTIN_SPEAKER};if(chosen!=null)audio.setCommunicationDevice(chosen)}else audio.isSpeakerphoneOn=!wired}catch(_:SecurityException){}
+        publish()
+    }
     private fun output():String {
         val route=try{if(Build.VERSION.SDK_INT>=31)audio.communicationDevice else null}catch(_:SecurityException){null}
         val type=route?.type
@@ -156,7 +168,7 @@ class MobileService:Service() {
     }
     private fun publish(){val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
-        val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
+        val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("local",LanAddress.ip(this)!=null).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
@@ -170,7 +182,7 @@ class MobileService:Service() {
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
     fun disconnect(){push(false);panic(true);prefs.edit().clear().apply();enqueue{try{if(profile.has("token"))call("leave",JSONObject())}catch(_:Exception){};main.post{stopSelf()}}}
     fun forget(){prefs.edit().clear().apply()}
-    override fun onDestroy(){rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
+    override fun onDestroy(){audio.unregisterAudioDeviceCallback(routes);rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
     private fun pack(q:JSONObject):String {val out=java.io.ByteArrayOutputStream();DeflaterOutputStream(out).use{it.write(q.toString().toByteArray())};return Base64.encodeToString(out.toByteArray(),Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)}
     private fun unpack(s:String):JSONObject {require(s.length<18000);val stream=InflaterInputStream(java.io.ByteArrayInputStream(Base64.decode(s,Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)));val out=java.io.ByteArrayOutputStream();val b=ByteArray(1024);stream.use{while(true){val n=it.read(b);if(n<0)break;require(out.size()+n<=32768);out.write(b,0,n)}};return JSONObject(out.toString("UTF-8"))}
 }
