@@ -27,7 +27,10 @@ class StartupCaptureTest {
                     try {
                         // Canvas.draw omits the icon's SurfaceView. Capture the real compositor instead.
                         Thread.sleep(300)
-                        val bitmap=inst.uiAutomation.takeScreenshot() ?: error("Display capture unavailable")
+                        // UiAutomation.takeScreenshot synchronizes input transactions and can
+                        // wait for splash removal. screencap reads the compositor without that cycle.
+                        val bytes=android.os.ParcelFileDescriptor.AutoCloseInputStream(inst.uiAutomation.executeShellCommand("screencap -p")).use{it.readBytes()}
+                        val bitmap=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size) ?: error("Display capture unavailable")
                         val logoVisible=(bitmap.width/4 until bitmap.width*3/4 step 8).any{x->
                             (bitmap.height/4 until bitmap.height*3/4 step 8).any{y->
                                 val p=bitmap.getPixel(x,y);android.graphics.Color.green(p)>100&&android.graphics.Color.green(p)>android.graphics.Color.red(p)*1.3
