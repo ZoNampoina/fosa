@@ -27,6 +27,7 @@ import com.google.zxing.*
 import com.google.zxing.qrcode.QRCodeWriter
 import android.graphics.Bitmap
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MobileActivity:ComponentActivity(){
     private var route by mutableStateOf("home");private var tab by mutableStateOf("TALK")
     private var name by mutableStateOf("ZO");private var role by mutableStateOf("SAX");private var sessionName by mutableStateOf("BAND LIVE")
@@ -40,7 +41,7 @@ class MobileActivity:ComponentActivity(){
         setContent{FosaTheme(theme){MobileRoot()}};handle(intent);scan()
     }
     override fun onNewIntent(i:Intent){super.onNewIntent(i);setIntent(i);handle(i)}
-    private fun handle(i:Intent){i.data?.let{u->if(u.host=="mobile-pair")MobileService.instance?.importWeb(u.toString()) else if(u.host=="mobile"){address=u.getQueryParameter("address") ?: "";code=u.getQueryParameter("code") ?: "";route="join"}}}
+    private fun handle(i:Intent){i.data?.let{u->if(u.host=="mobile-pair")MobileService.instance?.importWeb(u.toString()) else if(u.host=="mobile"){address=u.getQueryParameter("address") ?: "";code=u.getQueryParameter("code") ?: "";route="join"};Unit}}
     private fun askMic(){val list=mutableListOf(Manifest.permission.RECORD_AUDIO);if(android.os.Build.VERSION.SDK_INT>=33)list.add(Manifest.permission.POST_NOTIFICATIONS);permissions.launch(list.toTypedArray())}
     private fun launch(host:Boolean){getSharedPreferences("mobile-ui",MODE_PRIVATE).edit().putString("name",name).putString("role",role).apply();startForegroundService(Intent(this,MobileService::class.java).setAction("START").putExtra("host",host).putExtra("name",name).putExtra("role",role).putExtra("session",sessionName).putExtra("address",address).putExtra("code",code));tab="TALK"}
     private fun leave(){MobileService.instance?.forget();stopService(Intent(this,MobileService::class.java));route="home"}

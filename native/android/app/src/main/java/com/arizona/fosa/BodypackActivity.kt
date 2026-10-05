@@ -142,7 +142,7 @@ class BodypackActivity : ComponentActivity() {
             else startService(Intent(this@BodypackActivity,BodypackService::class.java).setAction("MIC"))
         } }
     }
-    override fun onRequestPermissionsResult(code:Int,permissions:Array<out String>,results:IntArray) {
+    override fun onRequestPermissionsResult(code:Int,permissions:Array<String>,results:IntArray) {
         super.onRequestPermissionsResult(code,permissions,results)
         if(code==11 && results.firstOrNull()==PackageManager.PERMISSION_GRANTED)
             startService(Intent(this,BodypackService::class.java).setAction("MIC"))
