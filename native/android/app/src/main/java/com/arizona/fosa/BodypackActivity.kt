@@ -33,8 +33,9 @@ class BodypackActivity : Activity() {
         address=EditText(this).apply { hint="IP du PC ou lien QR LAN"; setSingleLine(); setTextColor(Color.WHITE); setHintTextColor(Color.GRAY); setText(prefs.getString("server","")) }
         root.addView(address)
         val actions=LinearLayout(this)
-        actions.addView(Button(this).apply { text="CONNECT"; setOnClickListener { open(address.text.toString()) } },LinearLayout.LayoutParams(0,48,1f))
-        actions.addView(Button(this).apply { text="DETECT LAN"; setOnClickListener { discover() } },LinearLayout.LayoutParams(0,48,1f))
+        val actionHeight=(48*resources.displayMetrics.density).toInt()
+        actions.addView(Button(this).apply { text="CONNECT"; setOnClickListener { open(address.text.toString()) } },LinearLayout.LayoutParams(0,actionHeight,1f))
+        actions.addView(Button(this).apply { text="DETECT LAN"; setOnClickListener { discover() } },LinearLayout.LayoutParams(0,actionHeight,1f))
         root.addView(actions)
         status=TextView(this).apply { setTextColor(Color.LTGRAY); text="Même LAN que le PC • USB-C / écouteurs filaires"; setPadding(8,4,8,4) }; root.addView(status)
         devices=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; root.addView(devices)
