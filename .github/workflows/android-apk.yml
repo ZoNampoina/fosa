@@ -40,8 +40,11 @@ jobs:
           disable-animations: true
           working-directory: native/android
           script: |
+            set +e
             gradle connectedDebugAndroidTest
+            test_result=$?
             adb pull /sdcard/Android/data/com.arizona.fosa/files/screenshots ../../android-screenshots
+            exit $test_result
       - uses: actions/upload-artifact@v4
         if: always()
         with:

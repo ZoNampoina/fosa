@@ -15,7 +15,7 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class MobileUiTest {
     @get:Rule val ui=createAndroidComposeRule<MobileActivity>()
-    private fun shot(name:String){ui.waitForIdle();val dir=File(ui.activity.getExternalFilesDir(null),"screenshots");dir.mkdirs();File(dir,"$name.png").outputStream().use{ui.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG,100,it)}}
+    private fun shot(name:String){ui.waitForIdle();val dir=File(ui.activity.getExternalFilesDir(null),"screenshots");dir.mkdirs();File(dir,"$name.png").outputStream().use{InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG,100,it)}}
     @Test fun premiumScreensRealHostAndBackground(){
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()

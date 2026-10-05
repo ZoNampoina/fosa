@@ -1,3 +1,17 @@
+# FOSA Mobile 0.11 — Native LAN Intercom
+
+Android bénéficie d’une nouvelle interface Compose et d’un intercom privé entre téléphones : un téléphone crée la session, les autres rejoignent sur le même Wi-Fi/hotspot, sans PC, MR18 ou login cloud. Audio direct Opus/SRTP, Talk All/User/Group/Leader, Panic Mute, sessions par code/QR, découverte LAN et service d’écoute en arrière-plan.
+
+- **Android Native :** [APK FOSA](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
+- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage QR avec un hôte Android, page ouverte pendant l’audio.
+- **Démarrage et limites :** [guide court](docs/mobile/QUICKSTART.md).
+- **Architecture commune :** [FOSA LAN Protocol 1](docs/mobile/PROTOCOL.md).
+- **iOS natif :** [préparation SwiftUI](native/ios/README.md), sans IPA ni moteur audio iOS livré.
+
+La latence physique et le fonctionnement sur routeur/hotspot réels restent à vérifier avec les appareils. Les statistiques RTC sont distinctes de la latence audio. Les contrôles natifs de gate/EQ et la migration de l’hôte ne sont pas disponibles. Le Bodypack MR18 reste accessible depuis l’accueil Android et conserve son moteur PCM et son mix serveur.
+
+---
+
 # FOSA Bodypack 0.10
 
 Monitoring personnel MR18 USB/ASIO → PC → LAN → Android / navigateur. La version précédente est conservée ; le nouveau moteur ajoute Monitor Gain, limiteur et master indépendant.

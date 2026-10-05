@@ -6,6 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
+  ios-preparation:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile shared SwiftUI design and LAN control adapter
+        run: swift build --package-path native/ios/FosaMobile
   bridge:
     strategy:
       fail-fast: false

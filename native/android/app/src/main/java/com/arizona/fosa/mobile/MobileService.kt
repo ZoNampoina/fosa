@@ -141,11 +141,18 @@ class MobileService:Service() {
     }
     private fun unadvertise(){registration?.let{try{getSystemService(NsdManager::class.java).unregisterService(it)}catch(_:Exception){}};registration=null}
     fun joinLink():String="fosa://mobile?address=${Uri.encode(address)}&code=${room?.code ?: ""}&session=${room?.id ?: ""}"
-    private fun output():String {val d=audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS);return when{
-        d.any{it.type==AudioDeviceInfo.TYPE_BLUETOOTH_A2DP||it.type==AudioDeviceInfo.TYPE_BLUETOOTH_SCO}->"Bluetooth · latence supplémentaire"
-        d.any{it.type==AudioDeviceInfo.TYPE_USB_HEADSET||it.type==AudioDeviceInfo.TYPE_USB_DEVICE}->"USB audio / DAC"
-        d.any{it.type==AudioDeviceInfo.TYPE_WIRED_HEADPHONES||it.type==AudioDeviceInfo.TYPE_WIRED_HEADSET}->"Écouteurs filaires"
-        else->"Haut-parleur · attention au larsen"}}
+    private fun output():String {
+        val route=if(Build.VERSION.SDK_INT>=31)audio.communicationDevice else null
+        val type=route?.type
+        return when(type){
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,AudioDeviceInfo.TYPE_BLUETOOTH_SCO,AudioDeviceInfo.TYPE_BLE_HEADSET->"Bluetooth · latence supplémentaire"
+            AudioDeviceInfo.TYPE_USB_HEADSET,AudioDeviceInfo.TYPE_USB_DEVICE->"USB audio / DAC"
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,AudioDeviceInfo.TYPE_WIRED_HEADSET->"Écouteurs filaires"
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER->"Haut-parleur · attention au larsen"
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE->"Écouteur du téléphone"
+            else->"Sortie système · route non mesurée"
+        }
+    }
     private fun publish(){val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
         val s=JSONObject().put("phase",phase).put("error",error).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
