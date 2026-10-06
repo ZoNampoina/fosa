@@ -56,7 +56,7 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.12.1
+          name: FOSA-Android-v0.12.2
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
@@ -64,4 +64,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --cleanup-tag -y || true
-          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.1" --notes "FOSA Mobile 0.12.1: Bodypack navigation and visible LAN errors; held PTT and microphone permission recovery; private identity restored without duplicate members or stale audio links. Bodypack PCM continues through transient control timeouts. Code-only pairing retained." --latest
+          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.2" --notes "FOSA Mobile 0.12.2: direct Wi-Fi/hotspot audio, coordinated microphone renegotiation, retry of failed signalling messages, and actionable Hold to Talk microphone/network help. Update the host and every client. Existing Bodypack and same-device reconnection fixes retained." --latest

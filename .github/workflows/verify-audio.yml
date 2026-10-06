@@ -33,6 +33,7 @@ jobs:
       - run: node --check network-relay.js
       - run: node --check low-latency.js
       - run: node --check low-latency-worklet.js
+      - run: node mobile/tests/negotiation.cjs
       - run: node audio-bridge/tests/pcm_worklet.cjs
       - run: git diff --check
       - name: Parse Windows firewall helper

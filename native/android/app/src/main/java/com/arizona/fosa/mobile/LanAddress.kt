@@ -11,5 +11,13 @@ object LanAddress {
         return NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.firstOrNull{privateV4(it)}
     }
     fun candidate(value:String):Boolean { val p=value.split(' ');return p.size>7&&p[6]=="typ"&&p[7]=="host"&&(privateV4(p[4])||p[4].endsWith(".local")) }
+    fun addresses(ctx:Context):Set<String>{val cm=ctx.getSystemService(ConnectivityManager::class.java)
+        val registered=cm.allNetworks.filter{n->cm.getNetworkCapabilities(n)?.let{it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)}==true}
+            .flatMap{cm.getLinkProperties(it)?.linkAddresses ?: emptyList()}.mapNotNull{it.address.hostAddress}.filter{privateV4(it)}
+        val interfaces=runCatching{NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.filter{privateV4(it)}}.getOrDefault(emptyList())
+        return (registered+interfaces).toSet()
+    }
+    fun localCandidate(ctx:Context,value:String):Boolean= candidate(value)&&value.split(' ').getOrNull(4) in addresses(ctx)
+    fun localSdp(ctx:Context,value:String):String{val allowed=addresses(ctx);return value.split("\r\n").filter{!it.startsWith("a=candidate:")||candidate(it.removePrefix("a="))&&it.split(' ').getOrNull(4) in allowed}.joinToString("\r\n")}
     fun sdp(value:String):String=value.split("\r\n").filter{!it.startsWith("a=candidate:")||candidate(it.removePrefix("a="))}.joinToString("\r\n")
 }

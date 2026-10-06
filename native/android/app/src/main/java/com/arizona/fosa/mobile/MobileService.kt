@@ -27,6 +27,7 @@ class MobileService:Service() {
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var rtc:RtcMobile?=null
     private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L
+    private val outgoing=ArrayDeque<JSONObject>()
     private var routeWarning="";private var hadWired=false
     private val routes=object:AudioDeviceCallback(){override fun onAudioDevicesAdded(d:Array<out AudioDeviceInfo>){routeAudio()};override fun onAudioDevicesRemoved(d:Array<out AudioDeviceInfo>){routeAudio()}}
     private var error="";private var phase="idle";private var lastPoll=0L;private var mic=false
@@ -94,10 +95,18 @@ class MobileService:Service() {
         rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery() else rendezvousCycle();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
     }
     private fun enqueue(task:()->Unit){if(!work.isShutdown)try{work.execute{task()}}catch(_:RejectedExecutionException){}}
-    private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
+    private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{
+        if(type=="reset")outgoing.removeAll{it.optString("to")==to}
+        if(outgoing.size<256)outgoing.addLast(JSONObject().put("to",to).put("type",type).put("data",data)) else {error="Connexion audio saturée. Relance l’audio.";publish()}
+        flushSignals()
+    }},{publish()},{id,q->
         val host=room ?: throw IllegalArgumentException("Coordinateur indisponible")
         host.call(q.getString("path"),q.optJSONObject("body") ?: JSONObject(),host.ticket(id).getString("token"),"rtc:$id")
     })
+    // A brief HTTP timeout must not silently discard the only audio offer/ICE.
+    private fun flushSignals(){repeat(12){val value=outgoing.firstOrNull() ?: return
+        try{call("signal",value);outgoing.removeFirst()}catch(e:IllegalArgumentException){outgoing.removeFirst();error=e.message ?: "Signal audio refusé";publish()}catch(_:Exception){return}
+    }}
     private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
     @Suppress("DEPRECATION") private fun discoverJoin(join:JSONObject):Pair<String,JSONObject> {
         phase="Recherche de la session par code";publish()
@@ -154,7 +163,7 @@ class MobileService:Service() {
         val p=host.call("join",q.put("client","Web code"),remote="web-code");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
-        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt")
+        main.postDelayed({enqueue{try{val sdp=rtc?.localDescription(id) ?: throw IllegalStateException("Appairage non prêt")
             val answer=pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
             rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
         }catch(_:Exception){rendezvousSeen.remove(requestId)}}},2600)
@@ -172,13 +181,15 @@ class MobileService:Service() {
         lastPoll=SystemClock.elapsedRealtime();error="";phase="Session connectée"
         val members=session.getJSONArray("members");val list=(0 until members.length()).map{members.getJSONObject(it)}
         engine.sync(list)
+        flushSignals()
         val signals=session.getJSONArray("signals")
         for(n in 0 until signals.length()){val s=signals.getJSONObject(n);val from=s.getString("from")
             if(!s.has("generation")||list.any{it.optString("id")==from&&it.optInt("generation",1)==s.getInt("generation")})engine.receive(from,s.getString("type"),s.getJSONObject("data"))
             ack=maxOf(ack,s.getLong("seq"))}
         if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&ticks%3==0)rendezvousCycle()
-        // Recreate failed links after a bounded interval. The smaller UUID offers, avoiding glare.
-        if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
+        // Only the elected offerer retries, after this link's own deadline.
+        // Two phones resetting each other every eight seconds never settle.
+        engine.links.filter{(id,l)->profile.getString("id")<id&&!l.connected&&!manual.contains(id)&&SystemClock.elapsedRealtime()-l.started>12000}.keys.forEach{engine.reconnect(it)}
         publish()
     }catch(e:Exception){rtc?.push(false);phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish()}}
     fun push(active:Boolean,ttl:Long=30000){talkUntil=SystemClock.elapsedRealtime()+ttl;rtc?.push(active);publish()}
@@ -188,6 +199,9 @@ class MobileService:Service() {
     fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value);publish()}
     fun group(id:String,value:String){enqueue{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
     fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();enqueue{rtc?.enableMicrophone();publish()}}}
+    fun retryAudio(){enqueue{rtc?.let{engine->engine.links.filter{!it.value.connected&&it.key !in manual}.keys.toList().forEach{engine.reconnect(it)}
+        if(engine.links.any{!it.value.connected&&it.key in manual})error="Le membre Web doit rejoindre à nouveau avec le code session."
+    };publish()}}
     fun importWeb(value:String){enqueue{try{
         val host=room ?: throw IllegalArgumentException("Ouvre ce lien sur le téléphone qui a créé la session.")
         val encoded=if(value.startsWith("fosa:"))Uri.parse(value).getQueryParameter("data") ?: "" else value.trim()
@@ -196,7 +210,7 @@ class MobileService:Service() {
         rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
         // Gather host candidates into the answer; manual pairing cannot trickle before its channel opens.
-        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt. Réessaie.")
+        main.postDelayed({enqueue{try{val sdp=rtc?.localDescription(id) ?: throw IllegalStateException("Appairage non prêt. Réessaie.")
             pairAnswer="https://zonampoina.github.io/fosa/mobile/#answer="+pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
             publish()
         }catch(e:Exception){error=e.message ?: "Appairage impossible";publish()}}},3000)
@@ -245,7 +259,7 @@ class MobileService:Service() {
         }
     }
     private fun publish(){val version=publication.incrementAndGet();val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
-        val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
+        val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected).put("state",l.iceState).put("error",l.error).put("localCandidates",l.localCandidates).put("remoteCandidates",l.remoteCandidates))}
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))

@@ -1,4 +1,4 @@
-# FOSA Mobile — Android / Web 0.12.1
+# FOSA Mobile — Android / Web 0.12.2
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
@@ -21,8 +21,10 @@ Premier test : écouteurs filaires → monter CH1 → Monitor Gain → maintenir
 
 Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Un timeout temporaire du contrôle ne ferme plus le flux UDP authentifié ; Talk se coupe jusqu’au rétablissement des autorisations. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
 
-**Mise à jour 0.12.1**
-Installer l’APK sur l’hôte et les clients Android ; rouvrir la page Web pour charger le nouveau cache. Redémarrer la session après la mise à jour de l’hôte. Maintenir HOLD TO TALK pendant la parole ; autoriser le microphone si demandé. Après une perte de liaison, reconnecter le même appareil avec le même code : son identité et son groupe sont réutilisés, son audio est renégocié. Ne pas effacer les données de l’application ou du site pour une simple reconnexion.
+**Mise à jour 0.12.2**
+Installer l’APK sur l’hôte et tous les clients Android ; rouvrir la page Web pour charger le nouveau cache. Redémarrer la session après la mise à jour de l’hôte. Le micro est proposé à la création/connexion ; si son accès a été refusé, toucher HOLD TO TALK permet de le demander à nouveau. Après autorisation, maintenir de nouveau le bouton pour parler ; relâcher pour couper. Une activation simultanée des micros est coordonnée sans offres audio concurrentes.
+
+Les interfaces hotspot sont prises en compte par le moteur audio Android. Une perte temporaire de message de connexion entraîne une nouvelle tentative. Si l’audio reste en attente, utiliser RECONNECT AUDIO. Dans le Web, ce bouton reprend l’appairage avec le même code et l’identité enregistrée ; il ne crée pas un deuxième membre. L’appairage Web conserve son rendez-vous initial ou le QR hors ligne. Ne pas effacer les données de l’application ou du site pour une simple reconnexion.
 
 **First physical test**
 Android host + Android client → Talk User → Talk All → wired headphones → unplug router WAN → verify speech continues → screen off/on → stop/rejoin Wi-Fi → Panic Mute. Try the same with PWA only after native path succeeds. A guest network or AP isolation may prevent direct connections. Router/hotspot hardware is not available in the development environment; these tests remain to be run physically.

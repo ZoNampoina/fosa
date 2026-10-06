@@ -63,7 +63,7 @@ class MobileEngineTest {
         b=newB(false)
         val members=listOf(JSONObject().put("id","a").put("online",true).put("leader",true),JSONObject().put("id","b").put("online",true).put("group","BAND"))
         var upgradeOfferReceived=false
-        fun drain(){while(true){val q=messages.poll()?:break;if(q.first=="a"&&q.second=="offer")upgradeOfferReceived=true;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        fun drain(){while(true){val q=messages.poll()?:break;if(q.first=="a"&&q.second=="negotiate")upgradeOfferReceived=true;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
         try{a.sync(members);b.sync(members);await("Direct LAN native ICE must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
             val listeningPc=b.links.getValue("a").pc;assertNull(b.links.getValue("a").track)
             b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
@@ -78,6 +78,33 @@ class MobileEngineTest {
             val old=a.links.getValue("b").pc;b.close();b=newB(true);members[1].put("generation",2)
             a.sync(members);b.sync(members);await("Same identity must get a fresh connected audio transport"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
             assertNotSame(old,a.links.getValue("b").pc);assertEquals(2,a.links.getValue("b").generation)
+        }finally{a.close();b.close()}
+    }
+    @Test fun simultaneousMicrophonePermissionMustNotStrandAudio(){
+        val ctx=InstrumentationRegistry.getInstrumentation().targetContext
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
+        val messages=ConcurrentLinkedQueue<Triple<String,String,JSONObject>>()
+        val a=RtcMobile(ctx,"a",false,{_,type,data->messages.add(Triple("b",type,data))},{},{_,_->JSONObject()})
+        val b=RtcMobile(ctx,"b",false,{_,type,data->messages.add(Triple("a",type,data))},{},{_,_->JSONObject()})
+        val members=listOf(JSONObject().put("id","a").put("online",true),JSONObject().put("id","b").put("online",true))
+        var descriptions=0
+        fun drain(){while(true){val q=messages.poll()?:break;if(q.second=="offer"||q.second=="answer")descriptions++;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        try{
+            a.sync(members);b.sync(members)
+            await("Listening-only transports must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val initialDescriptions=descriptions
+            // Both phones grant access before either has received the other's
+            // new description. The original one-sided permission test missed this.
+            a.enableMicrophone();b.enableMicrophone()
+            await("Concurrent microphone activation must settle both audio descriptions"){
+                drain();descriptions>initialDescriptions&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE
+            }
+            a.push(true,"user:b")
+            await("The peer must actually receive Opus after microphone activation"){drain();b.stats();b.links["a"]?.stats?.optLong("packetsReceived",0)?.let{it>10L}==true}
+            a.push(false);assertFalse(a.talking)
+            b.push(true,"user:a")
+            await("Talk must also work in the opposite direction"){drain();a.stats();a.links["b"]?.stats?.optLong("packetsReceived",0)?.let{it>10L}==true}
+            b.push(false);assertFalse(b.talking)
         }finally{a.close();b.close()}
     }
 }

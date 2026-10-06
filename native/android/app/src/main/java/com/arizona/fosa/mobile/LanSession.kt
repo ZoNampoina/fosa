@@ -67,7 +67,7 @@ class LanSession(val name:String, val ownerName:String, val ownerRole:String, pr
             }
             "signal" -> {
                 val to=b.getString("to");if(to==uid||!users.containsKey(to))throw IllegalArgumentException("Membre absent")
-                val type=b.getString("type");if(type !in listOf("offer","answer","ice","reset"))throw IllegalArgumentException("Signal invalide")
+                val type=b.getString("type");if(type !in listOf("offer","answer","ice","reset","negotiate"))throw IllegalArgumentException("Signal invalide")
                 val value=b.getJSONObject("data");if(value.toString().length>24000)throw IllegalArgumentException("Signal trop grand")
                 val queue=messages.getValue(to);if(queue.size>=96)queue.removeAt(0)
                 queue.add(JSONObject().put("seq",++serial).put("from",uid).put("generation",p.optInt("generation",1)).put("type",type).put("data",value))
