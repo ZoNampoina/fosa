@@ -32,6 +32,7 @@ class MobileUiTest {
         ui.onNodeWithTag("nav-SETTINGS").performClick();shot("07-settings");ui.activityRule.scenario.onActivity{MobileService.instance!!.volume(.25)};ui.waitUntil(5000){MobileService.state.optDouble("master")==.25};ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithText("-12.0 dB").assertExists();ui.onNodeWithText("OFFLINE PACKAGE").performScrollTo().performClick();shot("08-offline");ui.onNodeWithText("CHECK OFFLINE READY").performClick();ui.onNodeWithText("APP SHELL · AUDIO · UI · ICONS READY").assertExists()
         ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick()
         val packets=peer!!.receivedPackets()
+        assertTrue("PTT must not be disabled by a transient control status once microphone is ready",MobileService.state.optBoolean("mic"))
         ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center)}
         ui.waitUntil(3000){MobileService.state.optBoolean("talk")}
         // A finger moving over the vertical scroller must keep PTT, including
