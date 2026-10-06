@@ -17,7 +17,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val signal:(String,String,JSONObject)->Unit,
     private val changed:()->Unit,
     private val rpc:(String,JSONObject)->JSONObject) {
-    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var iceState:String="NEW",var localCandidates:Int=0,var remoteCandidates:Int=0,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
+    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),val localIce:java.util.concurrent.CopyOnWriteArrayList<IceCandidate> = java.util.concurrent.CopyOnWriteArrayList(),var connected:Boolean=false,var iceState:String="NEW",var localCandidates:Int=0,var remoteCandidates:Int=0,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
     val links=ConcurrentHashMap<String,Link>()
     @Volatile var error="";private set
     @Volatile var playing=false;private set
@@ -107,7 +107,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->link.iceState=s.name;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;defer{if(links[id]===link)refreshTalk()}} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
-            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)){observed?.localCandidates=(observed?.localCandidates ?: 0)+1;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
+            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)){observed?.localIce?.add(c);observed?.localCandidates=observed?.localIce?.size ?: 0;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
             override fun onIceCandidatesRemoved(c:Array<out IceCandidate>){}
             override fun onAddStream(s:MediaStream){}
             override fun onRemoveStream(s:MediaStream){}
