@@ -56,7 +56,7 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.12.4
+          name: FOSA-Android-v0.12.5
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
@@ -64,4 +64,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --cleanup-tag -y || true
-          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.4" --notes "FOSA Mobile 0.12.4: fixes Web/native ICE pairing deadlock by carrying host LAN candidates in the pairing answer. Direct local audio/PTT can establish before the control channel opens; 0.12.3 recovery diagnostics retained." --latest
+          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.5" --notes "FOSA Mobile 0.12.5: keeps initial rendezvous active while WebRTC gathers LAN candidates, republishes newly discovered host ICE candidates, and completes Web join only after the direct control/audio link is actually open." --latest
