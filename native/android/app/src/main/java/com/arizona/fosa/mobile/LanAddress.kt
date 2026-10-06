@@ -11,6 +11,7 @@ object LanAddress {
     fun forHost(ctx:Context,host:String):Network? {
         val cm=ctx.getSystemService(ConnectivityManager::class.java)
         val target=try{InetAddress.getByName(host)}catch(_:Exception){return wifi(ctx)}
+        if(target.isLoopbackAddress)return null
         return cm.allNetworks.firstOrNull{n->
             val caps=cm.getNetworkCapabilities(n)
             val local=caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true||caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)==true
