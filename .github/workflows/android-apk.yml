@@ -63,5 +63,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete android-latest --cleanup-tag -y || true
-          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.5" --notes "FOSA Mobile 0.12.5: keeps initial rendezvous active while WebRTC gathers LAN candidates, republishes newly discovered host ICE candidates, and completes Web join only after the direct control/audio link is actually open." --latest
+          if gh release view android-latest >/dev/null 2>&1; then
+            gh release upload android-latest FOSA-Android.apk --clobber
+            gh release edit android-latest --title "FOSA Android v0.12.5" --notes "FOSA Mobile 0.12.5: keeps initial rendezvous active while WebRTC gathers LAN candidates, republishes newly discovered host ICE candidates, and completes Web join only after the direct control/audio link is actually open." --latest
+          else
+            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.5" --notes "FOSA Mobile 0.12.5: keeps initial rendezvous active while WebRTC gathers LAN candidates, republishes newly discovered host ICE candidates, and completes Web join only after the direct control/audio link is actually open." --latest
+          fi
