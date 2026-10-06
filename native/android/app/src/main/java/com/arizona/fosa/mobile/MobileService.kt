@@ -35,7 +35,7 @@ class MobileService:Service() {
     private var wake:PowerManager.WakeLock?=null;private var wifi:WifiManager.WifiLock?=null;private var multicast:WifiManager.MulticastLock?=null
     private var pairAnswer="";private val manual=mutableSetOf<String>();private var networkIp=""
     private val cloudWork=Executors.newSingleThreadExecutor();private val cloudBusy=java.util.concurrent.atomic.AtomicBoolean(false)
-    private var rendezvousSecret="";private val rendezvousSeen=mutableSetOf<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
+    private var rendezvousSecret="";private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
     private val rendezvousUrl="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous"
     private val rendezvousKey="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3"
     private val prefs by lazy{getSharedPreferences("mobile-session",MODE_PRIVATE)}
