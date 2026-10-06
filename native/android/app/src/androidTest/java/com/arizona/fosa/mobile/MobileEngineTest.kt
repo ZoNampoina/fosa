@@ -27,7 +27,7 @@ class MobileEngineTest {
         try{val c=URL("http://127.0.0.1:${http.port}/lan/join").openConnection() as HttpURLConnection;c.requestMethod="POST";c.doOutput=true;c.readTimeout=3000
             c.outputStream.use{it.write(JSONObject().put("code",room.code).put("name","Éléonore").toString().toByteArray())};val response=JSONObject(c.inputStream.bufferedReader().use{it.readText()});assertEquals("Éléonore",response.getString("name"));c.disconnect()
         }finally{http.close()}
-        assertFalse(LanAddress.candidate("candidate:1 1 UDP 1 8.8.8.8 1234 typ srflx"));assertFalse(LanAddress.privateV4("8.8.8.8"));assertTrue(LanAddress.privateV4("192.168.43.1"))
+        assertFalse(LanAddress.candidate("candidate:1 1 UDP 1 8.8.8.8 1234 typ srflx"));assertTrue(LanAddress.candidate("candidate:2 1 TCP 1 192.168.43.10 9 typ host tcptype active"));assertTrue(LanAddress.candidate("candidate:3 1 UDP 1 fd12::2 5555 typ host"));assertFalse(LanAddress.privateV4("8.8.8.8"));assertTrue(LanAddress.privateV4("192.168.43.1"));assertTrue(LanAddress.privateV6("fd12::2"))
     }
     @Test fun privateIdentityResumesWithoutMergingNames(){
         var now=1000L;val room=LanSession("LIVE","Zo","SAX"){now};val owner=room.ticket(room.owner).getString("token")
@@ -64,7 +64,10 @@ class MobileEngineTest {
         val members=listOf(JSONObject().put("id","a").put("online",true).put("leader",true),JSONObject().put("id","b").put("online",true).put("group","BAND"))
         var upgradeOfferReceived=false
         fun drain(){while(true){val q=messages.poll()?:break;if(q.first=="a"&&q.second=="offer")upgradeOfferReceived=true;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
-        try{a.sync(members);b.sync(members);await("Direct LAN native ICE must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+        try{
+            a.push(true,"user:b");assertTrue("PTT intent must be kept before the link exists",a.talkRequested);assertFalse(a.talking)
+            a.sync(members);b.sync(members);await("Direct LAN native ICE must connect and activate held PTT"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true&&a.talking}
+            assertTrue("Held PTT must enable the sender as soon as ICE connects",a.links.getValue("b").track!!.enabled());a.push(false)
             val listeningPc=b.links.getValue("a").pc;assertNull(b.links.getValue("a").track)
             b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
             assertSame(listeningPc,b.links.getValue("a").pc);b.push(true,"user:a");assertTrue(b.links.getValue("a").track!!.enabled());b.push(false)
@@ -72,7 +75,7 @@ class MobileEngineTest {
             a.push(true,"user:b");assertTrue(a.links.getValue("b").track!!.enabled())
             a.push(false);assertFalse(a.links.getValue("b").track!!.enabled())
             a.push(true,"group:BAND");assertTrue(a.links.getValue("b").track!!.enabled())
-            a.panic(true);assertTrue(a.muted);assertFalse(a.talking);assertFalse(a.links.getValue("b").track!!.enabled());assertTrue(a.links.getValue("b").connected)
+            a.panic(true);assertTrue(a.muted);assertFalse(a.talking);assertFalse(a.talkRequested);assertFalse(a.links.getValue("b").track!!.enabled());assertTrue(a.links.getValue("b").connected)
             a.panic(false);a.stats();b.stats();await("Measured RTC metrics must arrive"){a.stats();a.links.getValue("b").stats.has("rttMs")}
             a.reset();b.reset();a.sync(members);b.sync(members);await("Stream must reconnect after reset"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
             val old=a.links.getValue("b").pc;b.close();b=newB(true);members[1].put("generation",2)
