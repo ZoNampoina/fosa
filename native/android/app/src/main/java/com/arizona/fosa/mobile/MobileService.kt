@@ -149,15 +149,29 @@ class MobileService:Service() {
                 if(cached!=null)postRendezvousAnswer(requestId,cached) else if(rendezvousSeen.add(requestId))enqueue{pairCloud(requestId,r.getString("offer"))}}
         }catch(_:Exception){}finally{cloudBusy.set(false)}}
     }
+    private fun pairingIce(id:String):JSONArray {val out=JSONArray();rtc?.links?.get(id)?.localIce?.forEach{candidate->out.put(JSONObject().put("candidate",candidate.sdp).put("sdpMid",candidate.sdpMid).put("sdpMLineIndex",candidate.sdpMLineIndex))};return out}
+    private fun pairingAnswer(id:String,p:JSONObject):String {
+        val link=rtc?.links?.get(id) ?: throw IllegalStateException("Lien audio absent")
+        val sdp=link.pc.localDescription?.description ?: throw IllegalStateException("Réponse audio en préparation")
+        val ice=pairingIce(id);require(ice.length()>0){"Candidats ICE locaux en préparation"}
+        return pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("ice",ice).put("profile",p).put("host",profile.getString("id")))
+    }
+    private fun finishCloudPair(requestId:String,id:String,p:JSONObject,attempt:Int=0){
+        main.postDelayed({enqueue{try{
+            val answer=pairingAnswer(id,p);rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
+        }catch(_:Exception){if(attempt<20&&rtc?.links?.containsKey(id)==true)finishCloudPair(requestId,id,p,attempt+1) else rendezvousSeen.remove(requestId)}}},if(attempt==0)500 else 200)
+    }
+    private fun finishOfflinePair(id:String,p:JSONObject,attempt:Int=0){
+        main.postDelayed({enqueue{try{
+            pairAnswer="https://zonampoina.github.io/fosa/mobile/#answer="+pairingAnswer(id,p);error="";publish()
+        }catch(e:Exception){if(attempt<20&&rtc?.links?.containsKey(id)==true)finishOfflinePair(id,p,attempt+1) else {error=e.message ?: "Appairage impossible";publish()}}}},if(attempt==0)500 else 200)
+    }
     private fun pairCloud(requestId:String,encoded:String){try{
         val host=room ?: return;val q=unpack(encoded);require(q.getString("type")=="offer"&&q.optString("code")==host.code){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web code"),remote="web-code");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
-        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt")
-            val answer=pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
-            rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
-        }catch(_:Exception){rendezvousSeen.remove(requestId)}}},2600)
+        finishCloudPair(requestId,id,p)
     }catch(_:Exception){rendezvousSeen.remove(requestId)}}
     private fun postRendezvousAnswer(requestId:String,answer:String){if(cloudWork.isShutdown)return;cloudWork.execute{try{
         val host=room ?: return@execute;rendezvousRequest(JSONObject().put("action","host-answer").put("code",host.code).put("secret",rendezvousSecret).put("id",requestId).put("answer",answer));rendezvousAnswers.remove(requestId);rendezvousSeen.remove(requestId)
@@ -210,11 +224,8 @@ class MobileService:Service() {
         val p=host.call("join",q.put("client","Web fallback"),remote="web-pair");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
-        // Gather host candidates into the answer; manual pairing cannot trickle before its channel opens.
-        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt. Réessaie.")
-            pairAnswer="https://zonampoina.github.io/fosa/mobile/#answer="+pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
-            publish()
-        }catch(e:Exception){error=e.message ?: "Appairage impossible";publish()}}},3000)
+        // Manual pairing now carries native host ICE candidates explicitly; no WebRTC trickle deadlock.
+        finishOfflinePair(id,p)
     }catch(e:Exception){error=e.message ?: "Appairage impossible";publish()}}}
     private fun advertise(){val nsd=getSystemService(NsdManager::class.java);registration=object:NsdManager.RegistrationListener{
         override fun onServiceRegistered(i:NsdServiceInfo){}
