@@ -28,6 +28,7 @@ class BodypackService : Service() {
     @Volatile var panic = false
     @Volatile var talk = false
     @Volatile var micArmed = false
+    @Volatile private var talkAuthorized = false
     @Volatile var target = "all"
     @Volatile var connected = false
     @Volatile var error = ""
@@ -40,6 +41,7 @@ class BodypackService : Service() {
     @Volatile private var skipped = 0L
     @Volatile private var jitter = 0.0
     @Volatile private var rtt: Double? = null
+    @Volatile private var controlFailures = 0L
     @Volatile private var captureQueue = 0.0
     @Volatile private var ready = false
     @Volatile private var name = "Bodypack"
@@ -112,6 +114,7 @@ class BodypackService : Service() {
         else startForeground(31, notification)
     }
     fun muteLocal(value: Boolean) { panic = value; if (value) talk = false; handler.post { if (running.get()) foreground(micArmed) } }
+    fun controlTalk(active:Boolean,destination:String){target=destination.take(80);talk=active&&micArmed&&talkAuthorized&&!panic}
     fun request(path: String, body: JSONObject? = null): JSONObject {
         val conn = URL("$server/api/$path").openConnection() as HttpURLConnection
         conn.connectTimeout = 2500; conn.readTimeout = 2500
@@ -136,7 +139,7 @@ class BodypackService : Service() {
                 val session = request("native", JSONObject())
                 streamId = hex(session.getString("streamId")); outputKey = hex(session.getString("receiveKey")); inputKey = hex(session.getString("sendKey"))
                 name = session.getJSONObject("profile").optString("name", "Bodypack")
-                sendSequence = 0; controlSequence = 0; received = 0; missing = 0; invalid = 0; skipped = 0; lastPacket = 0
+                sendSequence = 0; controlSequence = 0; received = 0; missing = 0; invalid = 0; skipped = 0; lastPacket = 0;talkAuthorized=false
                 synchronized(ringLock) { next = -1; latest = -1; sequences.fill(-1); ring.fill(null); ready = false }
                 val udp = DatagramSocket().apply { connect(InetAddress.getByName(URI(server).host), session.getInt("port")); soTimeout = 1000; receiveBufferSize = 64*1024 }
                 socket = udp; send(byteArrayOf('H'.code.toByte()))
@@ -147,19 +150,27 @@ class BodypackService : Service() {
                 while (running.get() && socket === udp && !udp.isClosed) {
                     send(byteArrayOf('H'.code.toByte()))
                     val start = SystemClock.elapsedRealtimeNanos()
-                    val control = request("control", JSONObject().put("sequence", ++controlSequence).put("talk", talk && micArmed)
-                        .put("target", target).put("metrics", status()))
-                    rtt = (SystemClock.elapsedRealtimeNanos()-start)/1e6
-                    if (!control.optBoolean("talkAllowed")) { talk = false; if (micArmed) disableMic() }
+                    var controlOk=false
+                    try {
+                        val control = request("control", JSONObject().put("sequence", ++controlSequence).put("talk", talk && micArmed)
+                            .put("target", target).put("metrics", status()))
+                        rtt = (SystemClock.elapsedRealtimeNanos()-start)/1e6;controlOk=true
+                        talkAuthorized=control.optBoolean("talkAllowed")
+                        if (!talkAuthorized) { talk = false; if (micArmed) disableMic() }
+                    } catch(e:java.io.IOException) {
+                        // A slow control request must not tear down authenticated
+                        // UDP playback. Stop Talk until authorization is fresh.
+                        talkAuthorized=false;talk=false;rtt=null;controlFailures++;error="Contrôle en reconnexion : ${e.message ?: "réseau indisponible"}"
+                    }
                     val now = SystemClock.elapsedRealtime()
                     connected = lastPacket > 0 && now-lastPacket < 1500
-                    if (connected) { lostSince = now; error = "" }
+                    if (connected) { lostSince = now; if(controlOk)error = "" }
                     else if (now-lostSince > 4000) throw IllegalStateException("Flux UDP perdu : reconnexion")
                     Thread.sleep(500)
                 }
             } catch (e: Exception) { if (running.get()) error = e.message ?: "Liaison interrompue" }
             finally {
-                connected = false; talk = false; socket?.close(); socket = null
+                connected = false; talkAuthorized=false;talk = false; socket?.close(); socket = null
                 reader?.join(1200); player?.join(1200)
             }
             if (running.get()) try { Thread.sleep(1000) } catch (_: InterruptedException) { }
@@ -286,7 +297,7 @@ class BodypackService : Service() {
                 while(running.get() && micArmed) {
                     var offset=0
                     while(offset<480 && micArmed) { val n=input.read(pcm,offset,480-offset); if(n<0)throw IllegalStateException("AudioRecord $n"); offset+=n }
-                    if(talk && micArmed && offset==480) { System.arraycopy(pcm,0,body,1,480); send(body) }
+                    if(talk && talkAuthorized && micArmed && offset==480) { System.arraycopy(pcm,0,body,1,480); send(body) }
                 }
             } catch(e:Exception) { error="Micro : ${e.message}" }
             finally { try { input?.stop(); input?.release() } catch(_:Exception){}; recorder=null; micArmed=false; talk=false; handler.post { if(running.get())foreground(false) } }
@@ -306,10 +317,10 @@ class BodypackService : Service() {
         }
         val depth=synchronized(ringLock) { if(ready)max(0,latest-next+1)*5 else 0 }
         val battery=registerReceiver(null,IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        return JSONObject().put("connected",connected).put("playback",facts?.optBoolean("playing") ?: false)
-            .put("error",error).put("panic",panic).put("mic",micArmed).put("talk",talk)
+        return JSONObject().put("connected",connected&&lastPacket>0&&SystemClock.elapsedRealtime()-lastPacket<1500).put("playback",facts?.optBoolean("playing") ?: false)
+            .put("error",error).put("panic",panic).put("mic",micArmed).put("talk",talk&&talkAuthorized)
             .put("packets",received).put("missing",missing).put("invalid",invalid).put("skipped",skipped)
-            .put("jitter",jitter).put("rtt",rtt ?: JSONObject.NULL).put("buffer",depth)
+            .put("jitter",jitter).put("rtt",rtt ?: JSONObject.NULL).put("controlFailures",controlFailures).put("buffer",depth)
             .put("loss",if(received+missing>0)100.0*missing/(received+missing) else JSONObject.NULL)
             .put("network","LAN / UDP").put("output",route).put("audioLatency",JSONObject.NULL)
             .put("latencyMethod","UNKNOWN").put("captureQueueMs",captureQueue)

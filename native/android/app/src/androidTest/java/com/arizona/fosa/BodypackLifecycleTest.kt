@@ -21,6 +21,9 @@ import javax.crypto.spec.SecretKeySpec
 /** Real service/UDP/AudioTrack on emulator. No physical latency or MR18 assertion. */
 @RunWith(AndroidJUnit4::class)
 class BodypackLifecycleTest {
+    private fun readLine(input:java.io.InputStream):String?{val bytes=java.io.ByteArrayOutputStream()
+        while(true){val b=input.read();if(b<0)return if(bytes.size()==0)null else bytes.toString("UTF-8");if(b==10)return bytes.toString("UTF-8");if(b!=13)bytes.write(b)}
+    }
     private fun await(message:String, check:()->Boolean) {
         val end=SystemClock.elapsedRealtime()+15000
         while(SystemClock.elapsedRealtime()<end){if(check())return;Thread.sleep(50)}
@@ -34,16 +37,18 @@ class BodypackLifecycleTest {
         val server=ServerSocket(0,10,InetAddress.getByName("127.0.0.1"))
         val udp=DatagramSocket(0,InetAddress.getByName("127.0.0.1"));udp.soTimeout=500
         val active=AtomicBoolean(true);val talkPackets=AtomicInteger(0)
+        val delayControl=AtomicBoolean(false);val delayedControls=AtomicInteger(0)
         val id=ByteArray(8){it.toByte()};val receiveKey=ByteArray(32){(it+1).toByte()};val sendKey=ByteArray(32){(it+2).toByte()}
         fun hex(bytes:ByteArray)=bytes.joinToString(""){"%02x".format(it.toInt() and 255)}
         val endpoint=java.util.concurrent.atomic.AtomicReference<SocketAddress>()
         val httpThread=Thread {
             while(active.get())try {
                 server.accept().use { client ->
-                    val input=client.getInputStream().bufferedReader();val first=input.readLine() ?: return@use
+                    client.soTimeout=5000;val input=client.getInputStream().buffered();val first=readLine(input) ?: return@use
                     var size=0
-                    while(true){val line=input.readLine() ?: break;if(line.isEmpty())break;if(line.startsWith("Content-Length:",true))size=line.substringAfter(':').trim().toInt()}
-                    if(size>0){val body=CharArray(size);var offset=0;while(offset<size){val n=input.read(body,offset,size-offset);if(n<0)break;offset+=n}}
+                    while(true){val line=readLine(input) ?: break;if(line.isEmpty())break;if(line.startsWith("Content-Length:",true))size=line.substringAfter(':').trim().toInt()}
+                    if(size>0){val body=ByteArray(size);var offset=0;while(offset<size){val n=input.read(body,offset,size-offset);if(n<0)break;offset+=n}}
+                    if(first.contains("/api/control")&&delayControl.compareAndSet(true,false)){delayedControls.incrementAndGet();Thread.sleep(3200)}
                     val result=if(first.contains("/api/native"))JSONObject().put("port",udp.localPort).put("streamId",hex(id)).put("receiveKey",hex(receiveKey)).put("sendKey",hex(sendKey)).put("profile",JSONObject().put("name","EMULATOR TEST")) else JSONObject().put("ok",true).put("talkAllowed",true).put("talkActive",true)
                     val bytes=result.toString().toByteArray()
                     client.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray()+bytes)
@@ -86,6 +91,8 @@ class BodypackLifecycleTest {
             service.talk=true
             await("Talkback UDP must remain concurrent with playback") { talkPackets.get()>5 && service.status().optBoolean("playback") }
             service.talk=false
+            val priorControlFailures=service.status().optLong("controlFailures")
+            delayControl.set(true)
             scenario.onActivity { it.moveTaskToBack(true) }
             val before=service.status().getLong("packets")
             println("FOSA before background check: ${service.status()}")
@@ -94,6 +101,11 @@ class BodypackLifecycleTest {
             await("Background audio must keep receiving (baseline=$before)") {
                 val status=service.status()
                 status.getLong("packets")>before+100 && status.getBoolean("connected") && status.getBoolean("playback")
+            }
+            await("A slow control plane must not interrupt actual PCM playback") {
+                val status=service.status()
+                delayedControls.get()>0&&status.optLong("controlFailures")>priorControlFailures&&
+                    status.getLong("packets")>before+100&&status.getBoolean("playback")
             }
             println("FOSA after background check: ${service.status()}")
             service.muteLocal(true)

@@ -19,7 +19,7 @@ PC : MR18 USB → lancer FOSA SERVER → START LOW LATENCY → lire l’adresse 
 Téléphone : même LAN → OPEN BODYPACK (accueil ou Settings) → serveur détecté, IP manuelle ou lien QR du PC → CONNECT.
 Premier test : écouteurs filaires → monter CH1 → Monitor Gain → maintenir Talk → relâcher → Panic Mute.
 
-Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
+Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Un timeout temporaire du contrôle ne ferme plus le flux UDP authentifié ; Talk se coupe jusqu’au rétablissement des autorisations. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
 
 **Mise à jour 0.12.1**
 Installer l’APK sur l’hôte et les clients Android ; rouvrir la page Web pour charger le nouveau cache. Redémarrer la session après la mise à jour de l’hôte. Maintenir HOLD TO TALK pendant la parole ; autoriser le microphone si demandé. Après une perte de liaison, reconnecter le même appareil avec le même code : son identité et son groupe sont réutilisés, son audio est renégocié. Ne pas effacer les données de l’application ou du site pour une simple reconnexion.

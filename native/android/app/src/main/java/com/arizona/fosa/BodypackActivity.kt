@@ -165,7 +165,7 @@ class BodypackActivity : ComponentActivity() {
         @JavascriptInterface fun stop() { runOnUiThread { stopService(Intent(this@BodypackActivity,BodypackService::class.java)) } }
         @JavascriptInterface fun panic(active:Boolean) { BodypackService.instance?.muteLocal(active) }
         @JavascriptInterface fun status():String = BodypackService.instance?.status()?.toString() ?: JSONObject().put("connected",false).put("playback",false).toString()
-        @JavascriptInterface fun control(talk:Boolean,target:String) { BodypackService.instance?.let { it.target=target.take(80); it.talk=talk && it.micArmed } }
+        @JavascriptInterface fun control(talk:Boolean,target:String) { BodypackService.instance?.controlTalk(talk,target) }
         @JavascriptInterface fun target(ms:Int) { BodypackService.instance?.targetPackets=(ms/5).coerceIn(1,8) }
         @JavascriptInterface fun microphone(active:Boolean) { runOnUiThread {
             if(!active)BodypackService.instance?.disableMic()
