@@ -26,7 +26,7 @@ class MobileService:Service() {
     private val publication=java.util.concurrent.atomic.AtomicLong();private var appliedPublication=0L
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var rtc:RtcMobile?=null
-    private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L
+    private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L;private var repairDue=0L
     private var routeWarning="";private var hadWired=false
     private val routes=object:AudioDeviceCallback(){override fun onAudioDevicesAdded(d:Array<out AudioDeviceInfo>){routeAudio()};override fun onAudioDevicesRemoved(d:Array<out AudioDeviceInfo>){routeAudio()}}
     private var error="";private var phase="idle";private var lastPoll=0L;private var mic=false
@@ -164,7 +164,8 @@ class MobileService:Service() {
     }catch(_:Exception){}}}
     private fun tick(){try {
         val engine=rtc ?: return
-        if(engine.talking&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false)
+        val now=SystemClock.elapsedRealtime();if(engine.talkRequested&&now>talkUntil)engine.push(false)
+        if(engine.talkRequested&&!engine.talking&&repairDue>0&&now>=repairDue){forceRepair(engine);repairDue=now+5000}
         val ip=LanAddress.ip(this)
         if(ip==null){engine.push(false);phase="Réseau perdu · reconnexion";publish();return}
         if(ip!=networkIp){engine.push(false);engine.reset();networkIp=ip;getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(LanAddress.wifi(this));if(room!=null){val oldPort=http?.port ?: 0;http?.close();http=LanHttp(ip,room!!,oldPort);address="http://$ip:${http!!.port}";unadvertise();advertise()}}
@@ -181,7 +182,21 @@ class MobileService:Service() {
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
     }catch(e:Exception){rtc?.push(false);phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish()}}
-    fun push(active:Boolean,ttl:Long=30000){talkUntil=SystemClock.elapsedRealtime()+ttl;rtc?.push(active);publish()}
+    fun push(active:Boolean,ttl:Long=30000){
+        talkUntil=SystemClock.elapsedRealtime()+ttl
+        val engine=rtc;engine?.push(active)
+        repairDue=if(active&&engine?.talkRequested==true&&!engine.talking)SystemClock.elapsedRealtime()+1200 else 0L
+        publish()
+    }
+    private fun forceRepair(engine:RtcMobile){
+        val ids=engine.links.keys.toList()
+        ids.forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}}
+        engine.repair()
+        val members=session.optJSONArray("members")
+        if(members!=null){val list=(0 until members.length()).map{members.getJSONObject(it)};engine.sync(list)}
+        error="";phase="Audio · reconnexion directe";publish()
+    }
+    fun repairAudio(){enqueue{rtc?.let{forceRepair(it)}}}
     fun target(value:String){rtc?.let{it.push(false,value)};publish()}
     fun panic(active:Boolean){if(!active)routeWarning="";rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
     fun volume(value:Double){rtc?.volume(value);publish()}
@@ -245,9 +260,9 @@ class MobileService:Service() {
         }
     }
     private fun publish(){val version=publication.incrementAndGet();val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
-        val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected))}
+        val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected).put("iceState",l.iceState).put("localCandidates",l.localCandidates).put("remoteCandidates",l.remoteCandidates))}
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
-            .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
+            .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("talkRequested",engine?.talkRequested ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("local",LanAddress.ip(this)!=null).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
         val apply={if(instance===this&&version>appliedPublication){appliedPublication=version;state=s}}
