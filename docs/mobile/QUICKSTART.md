@@ -1,4 +1,4 @@
-# FOSA Mobile — Android 0.12.3 / Web 0.12.1
+# FOSA Mobile — Android 0.12.3 / Web 0.12.3
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
@@ -8,7 +8,7 @@
 5. Panic Mute cuts local listening and transmission. Receive continues in the foreground service while the screen is off. Notification Talk is limited to five seconds; touch Talk again to stop.
 
 **iPhone / iPad / Web fallback**
-1. Open https://zonampoina.github.io/fosa/mobile/ once with Internet and cache the app.
+1. Open https://zonampoina.github.io/fosa/mobile/ once with Internet and cache the app. Web 0.12.3 corrige le PTT silencieux avant connexion ICE et le verrouillage autoplay : une interaction dans l’écran TALK déverrouille la sortie audio.
 2. Join Session → enter name, role and the host's six-digit code → Join with Code.
 3. A short Supabase rendezvous exchanges only the initial WebRTC offer/answer. The host must have Internet for this pairing step.
 4. As soon as WebRTC is connected, audio and control remain direct on the local LAN. Internet can disappear without becoming an audio relay.
