@@ -259,7 +259,12 @@ class MobileService:Service() {
         return Notification.Builder(this,"fosa-mobile").setSmallIcon(R.drawable.fosa_logo).setContentTitle("FOSA MOBILE · ${profile.optString("sessionName","Local")}")
             .setContentText(if(rtc?.talking==true)"TALK · arrêt automatique après 5 s" else "LAN · ${(session.optJSONArray("members")?.length() ?: 1)} membres · ${if(rtc?.muted==true)"MUTED" else "Écoute active"}")
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
-    fun disconnect(){push(false);panic(true);prefs.edit().clear().apply();enqueue{try{if(profile.has("token"))call("leave",JSONObject())}catch(_:Exception){};main.post{stopSelf()}}}
+    fun disconnect(){push(false);panic(true);enqueue{
+        // A failed leave may still leave the old slot on the host. Keep its
+        // private proof so the next join restores it rather than duplicating it.
+        try{if(profile.has("token")){call("leave",JSONObject());if(room==null){val savedCode=prefs.getString("code","");prefs.edit().remove("profile").remove("address").remove("code").remove("client-key:$savedCode").apply()}}}catch(_:Exception){}
+        main.post{stopSelf()}
+    }}
     fun forget(){prefs.edit().clear().apply()}
     override fun onDestroy(){audio.unregisterAudioDeviceCallback(routes);rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();cloudWork.shutdownNow();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
     private fun pack(q:JSONObject):String {val out=java.io.ByteArrayOutputStream();DeflaterOutputStream(out).use{it.write(q.toString().toByteArray())};return Base64.encodeToString(out.toByteArray(),Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)}

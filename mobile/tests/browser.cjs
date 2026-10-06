@@ -91,6 +91,8 @@ try {
 
  await b.evaluate(async()=>{const f=fosaMobile,l=f.links.get(f.host);window.probe=new AudioContext();await probe.resume();const src=probe.createMediaStreamSource(l.audio.srcObject);window.meter=probe.createAnalyser();meter.fftSize=2048;src.connect(meter);window.rms=()=>{const a=new Float32Array(2048);meter.getFloatTimeDomainData(a);return Math.sqrt(a.reduce((s,x)=>s+x*x,0)/a.length);};});
  await host.evaluate(()=>{fosaMobile.destination('all');fosaMobile.push(true);});await b.waitForFunction(()=>rms()>.01,null,{timeout:10000});await host.evaluate(()=>fosaMobile.push(false));
+ // Losing the network while leaving must retain the private resume proof.
+ assert(await b.evaluate(async()=>{const f=fosaMobile,stored=localStorage.getItem('fosa-lan-session:123456'),api=f.api;f.api=async()=>{throw Error('Simulated lost LAN during leave');};await f.disconnect();f.api=api;return stored===localStorage.getItem('fosa-lan-session:123456')&&!f.profile&&!f.microphone&&!f.links.size;}));
  await ctx.setOffline(true);const cached=await ctx.newPage();await cached.goto(base);assert((await cached.textContent('h1')).includes('Your stage'));await cached.click('#offline');await cached.waitForSelector('#sheet-content .status');assert.equal(await cached.textContent('#sheet-content .status'),'READY');await cached.screenshot({path:path.join(out,'mobile-web-offline-reopen.png')});await ctx.setOffline(false);
  assert.deepEqual(errors,[]);await Promise.all(contexts.map(context=>context.close()));await browser.close();browser=null;
  // WebKit PWA cache and responsive UI; actual iPhone microphone/hardware not claimed.
