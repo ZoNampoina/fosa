@@ -17,12 +17,13 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val signal:(String,String,JSONObject)->Unit,
     private val changed:()->Unit,
     private val rpc:(String,JSONObject)->JSONObject) {
-    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
+    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var iceState:String="NEW",var localCandidates:Int=0,var remoteCandidates:Int=0,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
     val links=ConcurrentHashMap<String,Link>()
     @Volatile var error="";private set
     @Volatile var playing=false;private set
     var roster=emptyList<JSONObject>()
     @Volatile var talking=false;private set
+    @Volatile var talkRequested=false;private set
     @Volatile var target="all"
     @Volatile var muted=false;private set
     @Volatile var level:Double?=null;private set
@@ -68,12 +69,17 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     /** Granting permission must keep the live data channel and listening tracks. */
     @Synchronized fun enableMicrophone(){if(source!=null)return;source=createMicrophone();error=""
         links.forEach{(id,l)->val track=factory.createAudioTrack("mic-$id",source!!);track.setEnabled(false);l.track=track;l.pc.addTrack(track,listOf("fosa"));offer(id)}
-        changed()
+        refreshTalk()
     }
     fun microphoneReady():Boolean=source!=null
-    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
+    @Synchronized private fun refreshTalk(){
+        talking=talkRequested&&!muted&&source!=null&&links.any{it.value.connected&&eligible(it.key)}
+        links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))}
+        changed()
+    }
+    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talkRequested=active;refreshTalk()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
-    @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
+    @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)talkRequested=false;refreshTalk()}
     @Synchronized fun volume(value:Double){master=if(value.isFinite())value.coerceIn(0.0,1.0) else 0.0;links.values.forEach{it.received?.setVolume(master)}}
     fun mutedMembers():List<String> = memberMutes.filter{it.value}.keys.toList()
     @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;links[id]?.received?.setEnabled(!active)}
@@ -84,7 +90,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         live.forEach{id->val generation=members.first{it.optString("id")==id}.optInt("generation",1)
             if(links[id]?.generation?.let{it!=generation}==true)remove(id)
             if(!links.containsKey(id)){make(id).generation=generation;if(self<id)offer(id)}}
-        push(talking,target)
+        refreshTalk()
     }
     /** A fresh manual offer replaces the old transport before poll sees its epoch. */
     @Synchronized fun preparePair(id:String,generation:Int){push(false);remove(id);make(id).generation=generation}
@@ -93,15 +99,15 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         val config=PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy=PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            tcpCandidatePolicy=PeerConnection.TcpCandidatePolicy.DISABLED
+            tcpCandidatePolicy=PeerConnection.TcpCandidatePolicy.ENABLED
         }
         var observed:Link?=null
         val pc=factory.createPeerConnection(config,object:PeerConnection.Observer {
             override fun onSignalingChange(s:PeerConnection.SignalingState){}
-            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->val wasConnected=link.connected;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;if(wasConnected&&!link.connected)defer{if(links[id]===link&&!link.connected)push(false)};changed()} }
+            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->link.iceState=s.name;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;defer{if(links[id]===link)refreshTalk()}} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
-            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp))signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}
+            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)){observed?.localCandidates=(observed?.localCandidates ?: 0)+1;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
             override fun onIceCandidatesRemoved(c:Array<out IceCandidate>){}
             override fun onAddStream(s:MediaStream){}
             override fun onRemoveStream(s:MediaStream){}
@@ -131,7 +137,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Synchronized fun receive(id:String,type:String,data:JSONObject) {
         if(type=="reset"){remove(id);make(id);if(self<id)offer(id);return}
         val l=make(id)
-        if(type=="ice") {val value=data.optString("candidate");if(!LanAddress.candidate(value))return;val c=IceCandidate(data.optString("sdpMid"),data.optInt("sdpMLineIndex"),value);if(l.remote)l.pc.addIceCandidate(c) else l.pending.add(c);return}
+        if(type=="ice") {val value=data.optString("candidate");if(!LanAddress.candidate(value))return;l.remoteCandidates++;val c=IceCandidate(data.optString("sdpMid"),data.optInt("sdpMLineIndex"),value);if(l.remote)l.pc.addIceCandidate(c) else l.pending.add(c);changed();return}
         if(type !in listOf("offer","answer"))return
         if(type=="answer"&&l.pc.signalingState()==PeerConnection.SignalingState.STABLE)return
         val s=SessionDescription(if(type=="offer")SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,LanAddress.sdp(data.getString("sdp")))
@@ -141,7 +147,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         if(s.type=="candidate-pair"&&m["state"]=="succeeded"&&m["currentRoundTripTime"] is Number)out.put("rttMs",(m["currentRoundTripTime"] as Number).toDouble()*1000)
         if(s.type=="inbound-rtp"&&m["kind"]=="audio"){(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
     };l.stats=out;changed() }}}
-    @Synchronized fun reset(){push(false);links.keys.toList().forEach{remove(it)}}
+    @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
+    @Synchronized fun reset(){talkRequested=false;talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
     @Synchronized private fun remove(id:String){links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
     @Synchronized fun close(){if(closed)return;closed=true;callbacks.removeCallbacksAndMessages(null);reset();source?.dispose();factory.dispose();adm.release()}
 }
