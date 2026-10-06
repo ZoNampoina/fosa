@@ -1,7 +1,8 @@
 package com.arizona.fosa.mobile
 
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material3.*
@@ -10,6 +11,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.*
@@ -47,6 +49,12 @@ val FosaTypography=Typography(
 @Composable fun FosaSlider(label:String,value:Float,onChange:(Float)->Unit){Column{Row(Modifier.fillMaxWidth()){FosaLabel(label);Spacer(Modifier.weight(1f));Text(if(value<=0)"MUTE" else "${"%.1f".format(java.util.Locale.US,20*kotlin.math.log10(value.toDouble()))} dB",fontFamily=FontFamily.Monospace)};Slider(value,onChange,valueRange=0f..1f)}}
 @Composable fun FosaChannel(name:String,role:String,active:Boolean,level:Double?,connected:Boolean=true,content:@Composable ()->Unit){FosaPanel{Row(verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(46.dp).clip(FosaRadius.Control).background(MaterialTheme.colorScheme.surfaceVariant),contentAlignment=Alignment.Center){Text(name.take(2).uppercase(),fontWeight=FontWeight.Bold)};Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(name,style=MaterialTheme.typography.titleMedium);FosaLabel(role.ifBlank{"MEMBER"})};FosaStatus(if(active)"TALKING" else if(connected)"LOCAL" else "OFFLINE",connected)};FosaMeter(if(active)level else null);content()}}
 @Composable fun FosaTalkButton(transmitting:Boolean,enabled:Boolean,onHold:(Boolean)->Unit,modifier:Modifier=Modifier){val haptic=androidx.compose.ui.platform.LocalHapticFeedback.current;val vibrate=LocalFosaHaptic.current
+    val currentHold by rememberUpdatedState(onHold);val currentEnabled by rememberUpdatedState(enabled);val currentVibrate by rememberUpdatedState(vibrate)
+    LaunchedEffect(enabled){if(!enabled)currentHold(false)}
     Box(modifier.sizeIn(minWidth=180.dp,minHeight=180.dp).aspectRatio(1f).clip(CircleShape).background(if(transmitting)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
         .border(2.dp,if(transmitting)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.25f),CircleShape)
-        .testTag("talk-button").pointerInput(enabled,vibrate){if(enabled)detectTapGestures(onPress={if(vibrate)haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress);onHold(true);try{tryAwaitRelease()}finally{onHold(false)}})},contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(10.dp)){Text(if(transmitting)"●" else "◉",fontSize=26.sp,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary);Text(if(transmitting)"TALKING" else "HOLD TO TALK",fontSize=22.sp,fontWeight=FontWeight.Bold,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface);Text(if(enabled)"Release to listen" else "Microphone / réseau requis",fontSize=12.sp,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)}}}
+        .testTag("talk-button").semantics{role=Role.Button;stateDescription=if(transmitting)"TALKING" else "HOLD TO TALK";if(!enabled)disabled();onClick(label=if(transmitting)"Stop talking" else "Start talking"){if(enabled){currentHold(!transmitting);true}else false}}
+        .pointerInput(Unit){awaitEachGesture{val down=awaitFirstDown(requireUnconsumed=false)
+            if(currentEnabled){down.consume();if(currentVibrate)haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                try{currentHold(true);do{val event=awaitPointerEvent();event.changes.forEach{it.consume()}}while(event.changes.any{it.id==down.id&&it.pressed})}finally{currentHold(false)}
+            }}},contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(10.dp)){Text(if(transmitting)"●" else "◉",fontSize=26.sp,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary);Text(if(transmitting)"TALKING" else "HOLD TO TALK",fontSize=22.sp,fontWeight=FontWeight.Bold,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface);Text(if(enabled)"Release to listen" else "Microphone / réseau requis",fontSize=12.sp,color=if(transmitting)MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)}}}

@@ -30,7 +30,20 @@ class MobileUiTest {
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.let{a->(0 until a.length()).any{a.getJSONObject(it).optBoolean("connected")}}==true}
         shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithText("MUTE").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithTag("nav-STATUS").performClick();ui.onNodeWithTag("nav-MEMBERS").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithText("UNMUTE").performClick();ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
         ui.onNodeWithTag("nav-SETTINGS").performClick();shot("07-settings");ui.activityRule.scenario.onActivity{MobileService.instance!!.volume(.25)};ui.waitUntil(5000){MobileService.state.optDouble("master")==.25};ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithText("-12.0 dB").assertExists();ui.onNodeWithText("OFFLINE PACKAGE").performScrollTo().performClick();shot("08-offline");ui.onNodeWithText("CHECK OFFLINE READY").performClick();ui.onNodeWithText("APP SHELL · AUDIO · UI · ICONS READY").assertExists()
-        ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center);up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
+        ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick()
+        val packets=peer!!.receivedPackets()
+        ui.onNodeWithTag("talk-button").performScrollTo().performTouchInput{down(center)}
+        ui.waitUntil(3000){MobileService.state.optBoolean("talk")}
+        // A finger moving over the vertical scroller must keep PTT, including
+        // through tick/stats-driven recompositions. This was not covered by tap.
+        ui.onNodeWithTag("talk-button").performTouchInput{moveBy(androidx.compose.ui.geometry.Offset(0f,-65f))}
+        Thread.sleep(1300);assertTrue("Hold must still transmit after finger motion and state updates",MobileService.state.optBoolean("talk"))
+        ui.waitUntil(8000){peer!!.receivedPackets()>packets}
+        ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
+        val peerId=peer!!.id;peer!!.reconnect()
+        ui.waitUntil(15000){MobileService.state.optJSONArray("members")?.let{a->a.length()==2&&(0 until a.length()).any{a.getJSONObject(it).optString("id")==peerId&&a.getJSONObject(it).optInt("generation",1)==2}}==true}
+        ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.optJSONObject(0)?.let{it.optBoolean("connected")&&it.optString("id")==peerId}==true}
+        assertEquals(peerId,peer!!.id)
         peer!!.talk(true)
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.optJSONObject(0)?.optLong("packetsReceived",0)?.let{it>10L}==true}
         val before=MobileService.state.getJSONArray("metrics").getJSONObject(0).optLong("packetsReceived")

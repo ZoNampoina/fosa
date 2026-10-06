@@ -14,8 +14,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.arizona.fosa.mobile.*
@@ -31,6 +33,11 @@ class BodypackActivity : ComponentActivity() {
     private val devices=mutableStateListOf<Pair<String,String>>()
     private var controls by mutableStateOf(true)
     private var origin = ""
+    private var pageRequested by mutableStateOf(false)
+    private var loading by mutableStateOf(false)
+    private var loadFailed=false
+    private var loadAttempt=0
+    private val main=Handler(Looper.getMainLooper())
     private var discovery: NsdManager.DiscoveryListener? = null
     private var nsd: NsdManager? = null
     private val prefs by lazy { getSharedPreferences("bodypack",MODE_PRIVATE) }
@@ -45,37 +52,49 @@ class BodypackActivity : ComponentActivity() {
             webViewClient=object:WebViewClient() {
                 override fun shouldOverrideUrlLoading(view:WebView, request:WebResourceRequest):Boolean {
                     if(request.url.toString().startsWith("$origin/"))return false
-                    message="Lien externe : ${request.url.host ?: "adresse bloquée"}"
+                    failedLoad("Lien externe bloqué : ${request.url.host ?: "adresse invalide"}. Utilise l’adresse LAN du PC.")
                     return true
                 }
                 override fun onReceivedError(view:WebView, request:WebResourceRequest, error:WebResourceError) {
-                    if(request.isForMainFrame)message="Serveur inaccessible. Vérifie IP, Wi-Fi et pare-feu du PC."
+                    if(request.isForMainFrame)failedLoad("Serveur inaccessible (${error.description}). Vérifie l’IP, le Wi-Fi et le pare-feu du PC.")
                 }
+                override fun onReceivedHttpError(view:WebView,request:WebResourceRequest,response:WebResourceResponse){
+                    if(request.isForMainFrame)failedLoad("Le serveur répond HTTP ${response.statusCode}. Lance FOSA SERVER sur le PC et utilise son adresse de connexion Bodypack.")
+                }
+                override fun onPageFinished(view:WebView,url:String){if(!loadFailed&&url.startsWith("$origin/")){
+                    loading=false;message="Contrôle chargé • LAN • ${URI(origin).host}"
+                    prefs.edit().putString("server",origin).apply()
+                }}
             }
         }
         setContent { FosaTheme { Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=16.dp)) {
             FosaAppBar("BODYPACK","MR18 / PC")
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                FosaButton("‹ MOBILE",Modifier.weight(1f),secondary=true){ finish() }
-                FosaButton("CONNECTION",Modifier.weight(1f),secondary=true){controls=!controls}
+                FosaButton("‹ MOBILE",Modifier.weight(1f).testTag("bodypack-back"),secondary=true){ finish() }
+                FosaButton("CONNECTION",Modifier.weight(1f).testTag("bodypack-connection"),secondary=true){controls=if(pageRequested)!controls else true}
             }
-            if(controls)FosaPanel(Modifier.padding(vertical=12.dp)) {
+            if(controls)LazyColumn(Modifier.weight(1f).fillMaxWidth()){item{FosaPanel(Modifier.padding(vertical=12.dp).testTag("bodypack-setup")) {
                 FosaLabel("FOSA STAGE SERVER")
-                OutlinedTextField(serverAddress,{serverAddress=it},label={Text("PC address / QR link")},singleLine=true,modifier=Modifier.fillMaxWidth(),shape=FosaRadius.Control)
+                Text("Démarre FOSA SERVER sur le PC, puis START LOW LATENCY. Le Bodypack nécessite le PC relié à la MR18.",style=MaterialTheme.typography.bodySmall)
+                OutlinedTextField(serverAddress,{serverAddress=it},label={Text("PC address / QR link")},singleLine=true,modifier=Modifier.fillMaxWidth().testTag("bodypack-address"),shape=FosaRadius.Control)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    FosaButton("CONNECT",Modifier.weight(1f)){open(serverAddress)}
+                    FosaButton("CONNECT",Modifier.weight(1f).testTag("bodypack-connect"),enabled=serverAddress.isNotBlank()){open(serverAddress)}
                     FosaButton("DETECT LAN",Modifier.weight(1f),secondary=true){discover()}
                 }
-                Text(message,style=MaterialTheme.typography.bodySmall)
+                Text(message,style=MaterialTheme.typography.bodySmall,modifier=Modifier.testTag("bodypack-message"))
                 devices.forEach{(name,url)->FosaButton(name,Modifier.fillMaxWidth(),secondary=true){open(url)}}
-            }
-            AndroidView(factory={web},modifier=Modifier.weight(1f).fillMaxWidth())
+            }}}
+            if(loading&&!controls)Text(message,style=MaterialTheme.typography.bodySmall,modifier=Modifier.padding(vertical=8.dp))
+            AndroidView(factory={web},modifier=(if(pageRequested)Modifier.weight(1f) else Modifier.height(0.dp)).fillMaxWidth().testTag("bodypack-web"))
         } } }
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),10)
-        if(intent?.data!=null)open(intent.data.toString()) else if(serverAddress.isNotBlank())open(serverAddress) else discover()
+        message="Préparation du moteur Bodypack…"
+        AudioModeSwitch.toBodypack(this,{
+            if(intent?.data!=null)open(intent.data.toString()) else if(serverAddress.isNotBlank())open(serverAddress) else discover()
+        },{failedLoad(it)})
     }
-    override fun onNewIntent(intent:Intent) { super.onNewIntent(intent); setIntent(intent); intent.data?.let{open(it.toString())} }
+    override fun onNewIntent(intent:Intent) { super.onNewIntent(intent); setIntent(intent); intent.data?.let{url->AudioModeSwitch.toBodypack(this,{open(url.toString())},{failedLoad(it)})} }
     private fun open(value:String) {
         try {
             var text=value.trim()
@@ -94,14 +113,18 @@ class BodypackActivity : ComponentActivity() {
             val port=if(uri.port<0)8765 else uri.port
             val next="${uri.scheme}://$host:$port"
             if(origin.isNotEmpty() && origin!=next)stopService(Intent(this,BodypackService::class.java))
-            origin=next; serverAddress=origin; prefs.edit().putString("server",origin).apply()
+            origin=next; serverAddress=origin
             val fragment=uri.rawFragment?.let { "#$it" } ?: ""
+            loadFailed=false;loading=true;pageRequested=true;val attempt=++loadAttempt
+            controls=false;devices.clear();message="Chargement du serveur PC • $host…"
             web.loadUrl("$origin/network.html?musician=1&native=1$fragment")
-            controls=false; devices.clear(); message="LAN • $host • PCM natif en arrière-plan"
-        } catch(e:Exception) { message=e.message ?: "Adresse invalide" }
+            main.postDelayed({if(attempt==loadAttempt&&loading){web.stopLoading();failedLoad("Le serveur PC ne répond pas. Vérifie son adresse et que FOSA SERVER est démarré.")}},15000)
+        } catch(e:Exception) { controls=true;message=e.message ?: "Adresse invalide" }
     }
+    private fun failedLoad(cause:String){loadFailed=true;loading=false;pageRequested=false;controls=true;message=cause}
     private fun discover() {
         if(discovery!=null)return
+        controls=true
         nsd=getSystemService(NsdManager::class.java)
         devices.clear(); message="Recherche FOSA STAGE… IP manuelle disponible si multicast bloqué."
         discovery=object:NsdManager.DiscoveryListener {
@@ -124,6 +147,7 @@ class BodypackActivity : ComponentActivity() {
             }
         }
         nsd?.discoverServices("_fosa._tcp.",NsdManager.PROTOCOL_DNS_SD,discovery)
+        main.postDelayed({if(devices.isEmpty()&&controls&&!loading)message="Aucun serveur PC détecté. Lance FOSA SERVER et START LOW LATENCY, puis saisis l’IP affichée sur le PC."},6000)
     }
     inner class NativeAudio {
         @JavascriptInterface fun start(server:String,token:String,targetMs:Int):Boolean {
@@ -148,5 +172,5 @@ class BodypackActivity : ComponentActivity() {
             startService(Intent(this,BodypackService::class.java).setAction("MIC"))
     }
     override fun onPause() { super.onPause(); BodypackService.instance?.talk=false }
-    override fun onDestroy() { discovery?.let{ try{nsd?.stopServiceDiscovery(it)}catch(_:Exception){} }; web.removeJavascriptInterface("FosaAndroid"); web.destroy(); super.onDestroy() }
+    override fun onDestroy() { main.removeCallbacksAndMessages(null);discovery?.let{ try{nsd?.stopServiceDiscovery(it)}catch(_:Exception){} }; web.removeJavascriptInterface("FosaAndroid"); web.destroy(); super.onDestroy() }
 }

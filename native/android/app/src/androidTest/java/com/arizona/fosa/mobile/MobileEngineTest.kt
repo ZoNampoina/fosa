@@ -29,16 +29,45 @@ class MobileEngineTest {
         }finally{http.close()}
         assertFalse(LanAddress.candidate("candidate:1 1 UDP 1 8.8.8.8 1234 typ srflx"));assertFalse(LanAddress.privateV4("8.8.8.8"));assertTrue(LanAddress.privateV4("192.168.43.1"))
     }
+    @Test fun privateIdentityResumesWithoutMergingNames(){
+        var now=1000L;val room=LanSession("LIVE","Zo","SAX"){now};val owner=room.ticket(room.owner).getString("token")
+        val key="a".repeat(32);val join=JSONObject().put("code",room.code).put("name","JOHN").put("role","DRUMS").put("clientKey",key)
+        val first=room.call("join",join);val id=first.getString("id");val token=first.getString("token")
+        room.call("group",JSONObject().put("id",id).put("group","DRUMS"),owner)
+        room.call("poll",JSONObject().put("talk",true).put("level",-12),token)
+        room.call("signal",JSONObject().put("to",room.owner).put("type","ice").put("data",JSONObject()),token)
+        now+=8000
+        val resumed=room.call("join",join.put("resumeToken",token))
+        assertEquals(id,resumed.getString("id"));assertEquals(token,resumed.getString("token"));assertEquals(2,resumed.getInt("generation"));assertEquals("DRUMS",resumed.getString("group"));assertFalse(resumed.getBoolean("talk"))
+        val public=room.call("poll",JSONObject(),owner);assertEquals(2,public.getJSONArray("members").length());assertEquals(0,public.getJSONArray("signals").length())
+        for(i in 0 until public.getJSONArray("members").length()){val u=public.getJSONArray("members").getJSONObject(i);assertFalse(u.has("token"));assertFalse(u.has("clientKey"))}
+        val other=room.call("join",JSONObject().put("code",room.code).put("name","JOHN").put("role","DRUMS").put("clientKey","b".repeat(32)))
+        assertNotEquals("Two real devices may have the same name",id,other.getString("id"))
+        now+=61000
+        room.call("join",JSONObject().put("code",room.code).put("name","NEW DEVICE")) // retire stale active slots
+        val later=room.call("join",join);assertEquals(id,later.getString("id"));assertEquals("DRUMS",later.getString("group"))
+        assertEquals(3,room.call("poll",JSONObject(),owner).getJSONArray("members").length())
+        room.call("leave",JSONObject(),token)
+        assertNotEquals("Explicit leave revokes the old identity",id,room.call("join",join).getString("id"))
+        // Lost initial HTTP response: retrying the device key does not add a slot.
+        val retried=room.call("join",JSONObject().put("code",room.code).put("clientKey","c".repeat(32)))
+        assertEquals(retried.getString("id"),room.call("join",JSONObject().put("code",room.code).put("clientKey","c".repeat(32))).getString("id"))
+    }
     @Test fun nativeDirectOpusPttPrivacyPanicAndRecovery(){
         val ctx=InstrumentationRegistry.getInstrumentation().targetContext
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         val messages=ConcurrentLinkedQueue<Triple<String,String,JSONObject>>()
         lateinit var a:RtcMobile;lateinit var b:RtcMobile
         a=RtcMobile(ctx,"a",true,{_,type,data->messages.add(Triple("b",type,data))},{},{_,_->JSONObject()})
-        b=RtcMobile(ctx,"b",true,{_,type,data->messages.add(Triple("a",type,data))},{},{_,_->JSONObject()})
+        fun newB(mic:Boolean)=RtcMobile(ctx,"b",mic,{_,type,data->messages.add(Triple("a",type,data))},{},{_,_->JSONObject()})
+        b=newB(false)
         val members=listOf(JSONObject().put("id","a").put("online",true).put("leader",true),JSONObject().put("id","b").put("online",true).put("group","BAND"))
-        fun drain(){while(true){val q=messages.poll()?:break;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        var upgradeOfferReceived=false
+        fun drain(){while(true){val q=messages.poll()?:break;if(q.first=="a"&&q.second=="offer")upgradeOfferReceived=true;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
         try{a.sync(members);b.sync(members);await("Direct LAN native ICE must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val listeningPc=b.links.getValue("a").pc;assertNull(b.links.getValue("a").track)
+            b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
+            assertSame(listeningPc,b.links.getValue("a").pc);b.push(true,"user:a");assertTrue(b.links.getValue("a").track!!.enabled());b.push(false)
             a.push(true,"user:missing");assertFalse(a.links.getValue("b").track!!.enabled())
             a.push(true,"user:b");assertTrue(a.links.getValue("b").track!!.enabled())
             a.push(false);assertFalse(a.links.getValue("b").track!!.enabled())
@@ -46,6 +75,9 @@ class MobileEngineTest {
             a.panic(true);assertTrue(a.muted);assertFalse(a.talking);assertFalse(a.links.getValue("b").track!!.enabled());assertTrue(a.links.getValue("b").connected)
             a.panic(false);a.stats();b.stats();await("Measured RTC metrics must arrive"){a.stats();a.links.getValue("b").stats.has("rttMs")}
             a.reset();b.reset();a.sync(members);b.sync(members);await("Stream must reconnect after reset"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val old=a.links.getValue("b").pc;b.close();b=newB(true);members[1].put("generation",2)
+            a.sync(members);b.sync(members);await("Same identity must get a fresh connected audio transport"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            assertNotSame(old,a.links.getValue("b").pc);assertEquals(2,a.links.getValue("b").generation)
         }finally{a.close();b.close()}
     }
 }

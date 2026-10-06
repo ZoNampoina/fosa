@@ -15,7 +15,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val signal:(String,String,JSONObject)->Unit,
     private val changed:()->Unit,
     private val rpc:(String,JSONObject)->JSONObject) {
-    data class Link(val pc:PeerConnection,val track:AudioTrack?,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
+    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),var connected:Boolean=false,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null)
     val links=ConcurrentHashMap<String,Link>()
     @Volatile var error="";private set
     @Volatile var playing=false;private set
@@ -29,7 +29,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private var sampleTime=0L
     private val adm:JavaAudioDeviceModule
     private val factory:PeerConnectionFactory
-    private val source:AudioSource?
+    private var source:AudioSource?
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
         adm=JavaAudioDeviceModule.builder(ctx).setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setSampleRate(48000)
@@ -54,7 +54,13 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
                 val now=System.nanoTime();if(now-sampleTime>150000000L){sampleTime=now;val data=a.data;val b=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);var sum=0.0;var count=0;while(b.remaining()>=2){val v=b.short/32768.0;sum+=v*v;count++};level=if(count>0)max(-120.0,20*log10(max(1e-6,sqrt(sum/count)))) else null}
             }.createAudioDeviceModule()
         factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
-        source=if(mic)factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))}) else null
+        source=if(mic)createMicrophone() else null
+    }
+    private fun createMicrophone()=factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))})
+    /** Granting permission must keep the live data channel and listening tracks. */
+    @Synchronized fun enableMicrophone(){if(source!=null)return;source=createMicrophone();error=""
+        links.forEach{(id,l)->val track=factory.createAudioTrack("mic-$id",source!!);track.setEnabled(false);l.track=track;l.pc.addTrack(track,listOf("fosa"));offer(id)}
+        changed()
     }
     @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty()&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
@@ -66,9 +72,13 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         roster=members
         val live=members.filter{it.optString("id")!=self&&it.optBoolean("online")}.map{it.getString("id")}.toSet()
         links.keys.filter{it !in live}.forEach{remove(it)}
-        live.forEach{if(!links.containsKey(it)){make(it);if(self<it)offer(it)}}
+        live.forEach{id->val generation=members.first{it.optString("id")==id}.optInt("generation",1)
+            if(links[id]?.generation?.let{it!=generation}==true)remove(id)
+            if(!links.containsKey(id)){make(id).generation=generation;if(self<id)offer(id)}}
         push(talking,target)
     }
+    /** A fresh manual offer replaces the old transport before poll sees its epoch. */
+    @Synchronized fun preparePair(id:String,generation:Int){push(false);remove(id);make(id).generation=generation}
     @Synchronized private fun make(id:String):Link {
         links[id]?.let{return it}
         val config=PeerConnection.RTCConfiguration(emptyList()).apply {
@@ -76,22 +86,23 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             continualGatheringPolicy=PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             tcpCandidatePolicy=PeerConnection.TcpCandidatePolicy.DISABLED
         }
+        var observed:Link?=null
         val pc=factory.createPeerConnection(config,object:PeerConnection.Observer {
             override fun onSignalingChange(s:PeerConnection.SignalingState){}
-            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){ links[id]?.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;changed() }
+            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{val wasConnected=it.connected;it.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;if(wasConnected&&!it.connected)push(false);changed()} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
-            override fun onIceCandidate(c:IceCandidate){if(LanAddress.candidate(c.sdp))signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}
+            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp))signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}
             override fun onIceCandidatesRemoved(c:Array<out IceCandidate>){}
             override fun onAddStream(s:MediaStream){}
             override fun onRemoveStream(s:MediaStream){}
-            override fun onDataChannel(c:DataChannel){wire(id,c)}
+            override fun onDataChannel(c:DataChannel){if(observed!=null&&links[id]===observed)wire(id,c)}
             override fun onRenegotiationNeeded(){}
-            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){(r.track() as? AudioTrack)?.let{links[id]?.received=it;it.setVolume(master);it.setEnabled(memberMutes[id]!=true)}}
+            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){if(observed!=null&&links[id]===observed)(r.track() as? AudioTrack)?.let{observed?.received=it;it.setVolume(master);it.setEnabled(memberMutes[id]!=true)}}
         }) ?: error("Audio WebRTC indisponible")
         val track=source?.let{factory.createAudioTrack("mic-$id",it).also{t->t.setEnabled(false);pc.addTrack(t,listOf("fosa"))}}
         if(track==null)pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
-        val link=Link(pc,track);links[id]=link
+        val link=Link(pc,track);observed=link;links[id]=link
         return link
     }
     private fun wire(id:String,c:DataChannel){links[id]?.channel=c;c.registerObserver(object:DataChannel.Observer {
@@ -106,8 +117,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         override fun onCreateFailure(s:String){changed()}
         override fun onSetFailure(s:String){changed()}
     }
-    private fun publish(id:String,type:String,s:SessionDescription){val l=links[id]?:return;l.pc.setLocalDescription(observer(done={signal(id,type,JSONObject().put("sdp",LanAddress.sdp(s.description)).put("type",type))}),s)}
-    @Synchronized fun offer(id:String){val l=make(id);if(l.channel==null)wire(id,l.pc.createDataChannel("fosa-mobile",DataChannel.Init()));l.pc.createOffer(observer(created={publish(id,"offer",it)}),MediaConstraints())}
+    private fun publish(id:String,type:String,s:SessionDescription){val l=links[id]?:return;l.pc.setLocalDescription(observer(done={if(links[id]===l)signal(id,type,JSONObject().put("sdp",LanAddress.sdp(s.description)).put("type",type))}),s)}
+    @Synchronized fun offer(id:String){val l=make(id);if(l.channel==null)wire(id,l.pc.createDataChannel("fosa-mobile",DataChannel.Init()));l.pc.createOffer(observer(created={if(links[id]===l)publish(id,"offer",it)}),MediaConstraints())}
     @Synchronized fun receive(id:String,type:String,data:JSONObject) {
         if(type=="reset"){remove(id);make(id);if(self<id)offer(id);return}
         val l=make(id)
@@ -115,7 +126,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         if(type !in listOf("offer","answer"))return
         if(type=="answer"&&l.pc.signalingState()==PeerConnection.SignalingState.STABLE)return
         val s=SessionDescription(if(type=="offer")SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,LanAddress.sdp(data.getString("sdp")))
-        l.pc.setRemoteDescription(observer(done={synchronized(this){l.remote=true;l.pending.forEach{l.pc.addIceCandidate(it)};l.pending.clear()};if(type=="offer")l.pc.createAnswer(observer(created={publish(id,"answer",it)}),MediaConstraints())}),s)
+        l.pc.setRemoteDescription(observer(done={synchronized(this){if(links[id]===l){l.remote=true;l.pending.forEach{l.pc.addIceCandidate(it)};l.pending.clear();if(type=="offer")l.pc.createAnswer(observer(created={if(links[id]===l)publish(id,"answer",it)}),MediaConstraints())}}}),s)
     }
     @Synchronized fun stats(){links.values.forEach{l->l.pc.getStats { report->val out=JSONObject();report.statsMap.values.forEach{s->val m=s.members
         if(s.type=="candidate-pair"&&m["state"]=="succeeded"&&m["currentRoundTripTime"] is Number)out.put("rttMs",(m["currentRoundTripTime"] as Number).toDouble()*1000)

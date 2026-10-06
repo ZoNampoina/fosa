@@ -55,7 +55,7 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.12.0
+          name: FOSA-Android-v0.12.1
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
@@ -63,4 +63,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --cleanup-tag -y || true
-          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.0" --notes "FOSA Mobile 0.12.0: code-only native LAN pairing, automatic Web rendezvous pairing, offline QR fallback; Bodypack PCM retained." --latest
+          gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.1" --notes "FOSA Mobile 0.12.1: Bodypack navigation and visible LAN errors; held PTT and microphone permission recovery; private identity restored without duplicate members or stale audio links. Code-only pairing and Bodypack PCM retained." --latest

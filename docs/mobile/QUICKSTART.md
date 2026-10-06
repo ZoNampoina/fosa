@@ -1,4 +1,4 @@
-# FOSA Mobile — Android / Web 0.12.0
+# FOSA Mobile — Android / Web 0.12.1
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
@@ -15,7 +15,14 @@
 5. If Internet is unavailable during Web pairing, use the advanced Offline QR fallback. The old double-scan flow is no longer the normal path.
 
 **MR18 / PC**
-Open Bodypack from the new Android home. The existing PC server, personal mix, gain, limiter and native PCM path are retained. FOSA Mobile does not need the MR18 or a PC.
+PC : MR18 USB → lancer FOSA SERVER → START LOW LATENCY → lire l’adresse Bodypack affichée.
+Téléphone : même LAN → OPEN BODYPACK (accueil ou Settings) → serveur détecté, IP manuelle ou lien QR du PC → CONNECT.
+Premier test : écouteurs filaires → monter CH1 → Monitor Gain → maintenir Talk → relâcher → Panic Mute.
+
+Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
+
+**Mise à jour 0.12.1**
+Installer l’APK sur l’hôte et les clients Android ; rouvrir la page Web pour charger le nouveau cache. Redémarrer la session après la mise à jour de l’hôte. Maintenir HOLD TO TALK pendant la parole ; autoriser le microphone si demandé. Après une perte de liaison, reconnecter le même appareil avec le même code : son identité et son groupe sont réutilisés, son audio est renégocié. Ne pas effacer les données de l’application ou du site pour une simple reconnexion.
 
 **First physical test**
 Android host + Android client → Talk User → Talk All → wired headphones → unplug router WAN → verify speech continues → screen off/on → stop/rejoin Wi-Fi → Panic Mute. Try the same with PWA only after native path succeeds. A guest network or AP isolation may prevent direct connections. Router/hotspot hardware is not available in the development environment; these tests remain to be run physically.

@@ -77,13 +77,17 @@ class MobileService:Service() {
             val name=i.getStringExtra("name") ?: "Musicien";val role=i.getStringExtra("role") ?: ""
             val raw=i.getStringExtra("address")?.trim().orEmpty()
             val saved=prefs.getString("profile",null);val savedAddress=prefs.getString("address",null);val savedCode=prefs.getString("code",null)
+            val keyName="client-key:$requestedCode"
+            val clientKey=prefs.getString(keyName,null) ?: (java.util.UUID.randomUUID().toString()+java.util.UUID.randomUUID()).replace("-","").also{prefs.edit().putString(keyName,it).apply()}
+            val join=JSONObject().put("code",requestedCode).put("name",name).put("role",role).put("client","Native Android").put("clientKey",clientKey)
+            if(saved!=null&&savedCode==requestedCode)join.put("resumeToken",JSONObject(saved).optString("token"))
             var restored=false
             if(saved!=null&&savedAddress!=null&&savedCode==requestedCode&&(raw.isBlank()||normalizeAddress(raw)==savedAddress)){
-                try{address=savedAddress;profile=JSONObject(saved);request("poll",JSONObject().put("after",0),profile.optString("token"));restored=true}catch(_:Exception){}
+                try{address=savedAddress;profile=request("join",join);restored=true}catch(_:Exception){}
             }
             if(!restored){
-                if(raw.isNotBlank()){address=normalizeAddress(raw);profile=request("join",JSONObject().put("code",requestedCode).put("name",name).put("role",role).put("client","Native Android"))}
-                else {val found=discoverJoin(requestedCode,name,role);address=found.first;profile=found.second}
+                if(raw.isNotBlank()){address=normalizeAddress(raw);profile=request("join",join)}
+                else {val found=discoverJoin(join);address=found.first;profile=found.second}
             }
             prefs.edit().putString("address",address).putString("profile",profile.toString()).putString("code",requestedCode).apply()
         }
@@ -95,7 +99,7 @@ class MobileService:Service() {
         host.call(q.getString("path"),q.optJSONObject("body") ?: JSONObject(),host.ticket(id).getString("token"),"rtc:$id")
     })
     private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
-    @Suppress("DEPRECATION") private fun discoverJoin(code:String,name:String,role:String):Pair<String,JSONObject> {
+    @Suppress("DEPRECATION") private fun discoverJoin(join:JSONObject):Pair<String,JSONObject> {
         phase="Recherche de la session par code";publish()
         val nsd=getSystemService(NsdManager::class.java);val candidates=LinkedBlockingQueue<String>();val tried=mutableSetOf<String>()
         val listener=object:NsdManager.DiscoveryListener{
@@ -116,7 +120,7 @@ class MobileService:Service() {
                 val candidate=candidates.poll(700,TimeUnit.MILLISECONDS) ?: continue
                 if(!tried.add(candidate))continue
                 address=candidate
-                try{return candidate to request("join",JSONObject().put("code",code).put("name",name).put("role",role).put("client","Native Android"))}catch(_:Exception){}
+                try{return candidate to request("join",join)}catch(_:Exception){}
             }
         }finally{try{nsd.stopServiceDiscovery(listener)}catch(_:Exception){}}
         address=""
@@ -148,6 +152,7 @@ class MobileService:Service() {
     private fun pairCloud(requestId:String,encoded:String){try{
         val host=room ?: return;val q=unpack(encoded);require(q.getString("type")=="offer"&&q.optString("code")==host.code){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web code"),remote="web-code");val id=p.getString("id");host.reservePair(id);manual.add(id)
+        rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
         main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt")
             val answer=pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
@@ -168,7 +173,9 @@ class MobileService:Service() {
         val members=session.getJSONArray("members");val list=(0 until members.length()).map{members.getJSONObject(it)}
         engine.sync(list)
         val signals=session.getJSONArray("signals")
-        for(n in 0 until signals.length()){val s=signals.getJSONObject(n);engine.receive(s.getString("from"),s.getString("type"),s.getJSONObject("data"));ack=maxOf(ack,s.getLong("seq"))}
+        for(n in 0 until signals.length()){val s=signals.getJSONObject(n);val from=s.getString("from")
+            if(!s.has("generation")||list.any{it.optString("id")==from&&it.optInt("generation",1)==s.getInt("generation")})engine.receive(from,s.getString("type"),s.getJSONObject("data"))
+            ack=maxOf(ack,s.getLong("seq"))}
         if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&ticks%3==0)rendezvousCycle()
         // Recreate failed links after a bounded interval. The smaller UUID offers, avoiding glare.
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
@@ -180,12 +187,13 @@ class MobileService:Service() {
     fun volume(value:Double){rtc?.volume(value);publish()}
     fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value);publish()}
     fun group(id:String,value:String){enqueue{try{call("group",JSONObject().put("id",id).put("group",value))}catch(e:Exception){error=e.message ?: "Groupe indisponible";publish()}}}
-    fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();enqueue{rtc?.close();rtc=newRtc();manual.clear();publish()}}}
+    fun armMic(){if(!mic&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){foreground();enqueue{rtc?.enableMicrophone();publish()}}}
     fun importWeb(value:String){enqueue{try{
         val host=room ?: throw IllegalArgumentException("Ouvre ce lien sur le téléphone qui a créé la session.")
         val encoded=if(value.startsWith("fosa:"))Uri.parse(value).getQueryParameter("data") ?: "" else value.trim()
         val q=unpack(encoded);require(q.getString("type")=="offer"){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web fallback"),remote="web-pair");val id=p.getString("id");host.reservePair(id);manual.add(id)
+        rtc!!.preparePair(id,p.optInt("generation",1))
         rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
         // Gather host candidates into the answer; manual pairing cannot trickle before its channel opens.
         main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt. Réessaie.")

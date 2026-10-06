@@ -1,9 +1,11 @@
-# FOSA Mobile 0.12 — Code-Only LAN Pairing
+# FOSA Mobile 0.12.1 — Bodypack, Talk et reconnexion
+
+Les correctifs 0.12.1 rendent les erreurs Bodypack visibles, protègent le maintien de Talk contre le défilement, activent le micro sans fermer la liaison et réutilisent les identifiants privés à la reconnexion. Mettre à jour l’hôte Android ainsi que ses clients.
 
 FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android reste entièrement LAN/offline ; le Web utilise un rendez-vous HTTPS éphémère uniquement pour échanger l’offre/réponse initiale, puis l’audio Opus/SRTP et les commandes restent directs sur le LAN.
 
 - **Android Native :** [APK FOSA](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
-- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage QR avec un hôte Android, page ouverte pendant l’audio.
+- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage par code avec un hôte Android (QR de secours), page ouverte pendant l’audio.
 - **Démarrage et limites :** [guide court](docs/mobile/QUICKSTART.md).
 - **Architecture commune :** [FOSA LAN Protocol 1](docs/mobile/PROTOCOL.md).
 - **iOS natif :** [préparation SwiftUI](native/ios/README.md), sans IPA ni moteur audio iOS livré.
