@@ -34,6 +34,10 @@ class MobileService:Service() {
     private var recovery:NsdManager.DiscoveryListener?=null
     private var wake:PowerManager.WakeLock?=null;private var wifi:WifiManager.WifiLock?=null;private var multicast:WifiManager.MulticastLock?=null
     private var pairAnswer="";private val manual=mutableSetOf<String>();private var networkIp=""
+    private val cloudWork=Executors.newSingleThreadExecutor();private val cloudBusy=java.util.concurrent.atomic.AtomicBoolean(false)
+    private var rendezvousSecret="";private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
+    private val rendezvousUrl="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous"
+    private val rendezvousKey="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3"
     private val prefs by lazy{getSharedPreferences("mobile-session",MODE_PRIVATE)}
     private val audio by lazy{getSystemService(AudioManager::class.java)}
     override fun onBind(i:Intent?):IBinder?=null
@@ -66,28 +70,93 @@ class MobileService:Service() {
         phase="Connexion locale";publish()
         if(i.getBooleanExtra("host",false)){
             room=LanSession(i.getStringExtra("session") ?: "BAND LIVE",i.getStringExtra("name") ?: "Musicien",i.getStringExtra("role") ?: "")
-            http=LanHttp(networkIp,room!!);address="http://$networkIp:${http!!.port}";profile=room!!.ticket(room!!.owner);advertise()
+            http=LanHttp(networkIp,room!!);address="http://$networkIp:${http!!.port}";profile=room!!.ticket(room!!.owner);rendezvousSecret=java.util.UUID.randomUUID().toString()+java.util.UUID.randomUUID();advertise()
         }else {
-            val raw=i.getStringExtra("address") ?: "";val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw")
-            require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};address="http://${u.host}:${u.port}"
-            val saved=prefs.getString("profile",null)
-            profile=if(prefs.getString("address",null)==address&&saved!=null)JSONObject(saved).also{try{request("poll",JSONObject().put("after",0),it.optString("token"))}catch(_:Exception){throw IllegalArgumentException("Session précédente expirée. Quitte-la puis rejoins avec le code.")}}
-            else request("join",JSONObject().put("code",i.getStringExtra("code")).put("name",i.getStringExtra("name")).put("role",i.getStringExtra("role")).put("client","Native Android"))
-            prefs.edit().putString("address",address).putString("profile",profile.toString()).apply()
+            val requestedCode=i.getStringExtra("code")?.trim() ?: ""
+            require(requestedCode.matches(Regex("\\d{6}"))){"Code session à 6 chiffres requis"}
+            val name=i.getStringExtra("name") ?: "Musicien";val role=i.getStringExtra("role") ?: ""
+            val raw=i.getStringExtra("address")?.trim().orEmpty()
+            val saved=prefs.getString("profile",null);val savedAddress=prefs.getString("address",null);val savedCode=prefs.getString("code",null)
+            var restored=false
+            if(saved!=null&&savedAddress!=null&&savedCode==requestedCode&&(raw.isBlank()||normalizeAddress(raw)==savedAddress)){
+                try{address=savedAddress;profile=JSONObject(saved);request("poll",JSONObject().put("after",0),profile.optString("token"));restored=true}catch(_:Exception){}
+            }
+            if(!restored){
+                if(raw.isNotBlank()){address=normalizeAddress(raw);profile=request("join",JSONObject().put("code",requestedCode).put("name",name).put("role",role).put("client","Native Android"))}
+                else {val found=discoverJoin(requestedCode,name,role);address=found.first;profile=found.second}
+            }
+            prefs.edit().putString("address",address).putString("profile",profile.toString()).putString("code",requestedCode).apply()
         }
-        rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
+        rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery() else rendezvousCycle();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
     }
     private fun enqueue(task:()->Unit){if(!work.isShutdown)try{work.execute{task()}}catch(_:RejectedExecutionException){}}
     private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
         val host=room ?: throw IllegalArgumentException("Coordinateur indisponible")
         host.call(q.getString("path"),q.optJSONObject("body") ?: JSONObject(),host.ticket(id).getString("token"),"rtc:$id")
     })
+    private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
+    @Suppress("DEPRECATION") private fun discoverJoin(code:String,name:String,role:String):Pair<String,JSONObject> {
+        phase="Recherche de la session par code";publish()
+        val nsd=getSystemService(NsdManager::class.java);val candidates=LinkedBlockingQueue<String>();val tried=mutableSetOf<String>()
+        val listener=object:NsdManager.DiscoveryListener{
+            override fun onDiscoveryStarted(t:String){}
+            override fun onDiscoveryStopped(t:String){}
+            override fun onStartDiscoveryFailed(t:String,e:Int){}
+            override fun onStopDiscoveryFailed(t:String,e:Int){}
+            override fun onServiceLost(i:NsdServiceInfo){}
+            override fun onServiceFound(i:NsdServiceInfo){nsd.resolveService(i,object:NsdManager.ResolveListener{
+                override fun onResolveFailed(i:NsdServiceInfo,e:Int){}
+                override fun onServiceResolved(i:NsdServiceInfo){val ip=i.host?.hostAddress ?: return;if(LanAddress.privateV4(ip))candidates.offer("http://$ip:${i.port}")}
+            })}
+        }
+        nsd.discoverServices("_fosa-mobile._tcp.",NsdManager.PROTOCOL_DNS_SD,listener)
+        val deadline=SystemClock.elapsedRealtime()+6500
+        try{
+            while(SystemClock.elapsedRealtime()<deadline){
+                val candidate=candidates.poll(700,TimeUnit.MILLISECONDS) ?: continue
+                if(!tried.add(candidate))continue
+                address=candidate
+                try{return candidate to request("join",JSONObject().put("code",code).put("name",name).put("role",role).put("client","Native Android"))}catch(_:Exception){}
+            }
+        }finally{try{nsd.stopServiceDiscovery(listener)}catch(_:Exception){}}
+        address=""
+        throw IllegalArgumentException(if(tried.isEmpty())"Aucune session FOSA détectée. Vérifie que tous les appareils sont sur le même Wi-Fi ou hotspot." else "Aucune session ne correspond à ce code. Vérifie les 6 chiffres puis réessaie.")
+    }
     private fun request(path:String,b:JSONObject,token:String=""):JSONObject {
         val url=URL("$address/lan/$path");val c=(LanAddress.wifi(this)?.openConnection(url) ?: url.openConnection()) as java.net.HttpURLConnection
         c.connectTimeout=1500;c.readTimeout=2000;c.requestMethod="POST";c.doOutput=true;c.setRequestProperty("Content-Type","application/json");if(token.isNotEmpty())c.setRequestProperty("Authorization","Bearer $token")
         try{c.outputStream.use{it.write(b.toString().toByteArray())};val result=JSONObject((if(c.responseCode<400)c.inputStream else c.errorStream).bufferedReader().use{it.readText()});if(result.has("error"))throw IllegalArgumentException(result.getString("error"));return result}finally{c.disconnect()}
     }
     private fun call(path:String,b:JSONObject)=room?.call(path,b,profile.optString("token")) ?: request(path,b,profile.optString("token"))
+    private fun rendezvousRequest(body:JSONObject):JSONObject {
+        val cm=getSystemService(ConnectivityManager::class.java);val url=URL(rendezvousUrl)
+        val internet=cm.allNetworks.firstOrNull{n->cm.getNetworkCapabilities(n)?.let{c->c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)&&c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)&&c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)}==true}
+            ?:cm.allNetworks.firstOrNull{n->cm.getNetworkCapabilities(n)?.let{c->c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)&&c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)}==true}
+        val c=((internet?.openConnection(url)) ?: url.openConnection()) as java.net.HttpURLConnection
+        c.connectTimeout=1800;c.readTimeout=2600;c.requestMethod="POST";c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.setRequestProperty("apikey",rendezvousKey)
+        try{c.outputStream.use{it.write(body.toString().toByteArray())};val stream=if(c.responseCode<400)c.inputStream else c.errorStream;val result=JSONObject(stream.bufferedReader().use{it.readText()});if(c.responseCode>=400||result.has("error"))throw IllegalArgumentException(result.optString("error","Rendez-vous indisponible"));return result}finally{c.disconnect()}
+    }
+    private fun rendezvousCycle(){
+        val host=room ?: return;if(rendezvousSecret.isBlank()||!cloudBusy.compareAndSet(false,true)||cloudWork.isShutdown)return
+        cloudWork.execute{try{
+            rendezvousRequest(JSONObject().put("action","host-register").put("code",host.code).put("secret",rendezvousSecret).put("session",host.id))
+            val rows=rendezvousRequest(JSONObject().put("action","host-poll").put("code",host.code).put("secret",rendezvousSecret)).optJSONArray("requests") ?: JSONArray()
+            for(n in 0 until rows.length()){val r=rows.getJSONObject(n);val requestId=r.getString("id");val cached=rendezvousAnswers[requestId]
+                if(cached!=null)postRendezvousAnswer(requestId,cached) else if(rendezvousSeen.add(requestId))enqueue{pairCloud(requestId,r.getString("offer"))}}
+        }catch(_:Exception){}finally{cloudBusy.set(false)}}
+    }
+    private fun pairCloud(requestId:String,encoded:String){try{
+        val host=room ?: return;val q=unpack(encoded);require(q.getString("type")=="offer"&&q.optString("code")==host.code){"Invitation Web invalide"}
+        val p=host.call("join",q.put("client","Web code"),remote="web-code");val id=p.getString("id");host.reservePair(id);manual.add(id)
+        rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
+        main.postDelayed({enqueue{try{val sdp=rtc?.links?.get(id)?.pc?.localDescription?.description ?: throw IllegalStateException("Appairage non prêt")
+            val answer=pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("profile",p).put("host",profile.getString("id")))
+            rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
+        }catch(_:Exception){rendezvousSeen.remove(requestId)}}},2600)
+    }catch(_:Exception){rendezvousSeen.remove(requestId)}}
+    private fun postRendezvousAnswer(requestId:String,answer:String){if(cloudWork.isShutdown)return;cloudWork.execute{try{
+        val host=room ?: return@execute;rendezvousRequest(JSONObject().put("action","host-answer").put("code",host.code).put("secret",rendezvousSecret).put("id",requestId).put("answer",answer));rendezvousAnswers.remove(requestId);rendezvousSeen.remove(requestId)
+    }catch(_:Exception){}}}
     private fun tick(){try {
         val engine=rtc ?: return
         if(engine.talking&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false)
@@ -100,7 +169,7 @@ class MobileService:Service() {
         engine.sync(list)
         val signals=session.getJSONArray("signals")
         for(n in 0 until signals.length()){val s=signals.getJSONObject(n);engine.receive(s.getString("from"),s.getString("type"),s.getJSONObject("data"));ack=maxOf(ack,s.getLong("seq"))}
-        if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())}
+        if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&ticks%3==0)rendezvousCycle()
         // Recreate failed links after a bounded interval. The smaller UUID offers, avoiding glare.
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
@@ -184,7 +253,7 @@ class MobileService:Service() {
             .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
     fun disconnect(){push(false);panic(true);prefs.edit().clear().apply();enqueue{try{if(profile.has("token"))call("leave",JSONObject())}catch(_:Exception){};main.post{stopSelf()}}}
     fun forget(){prefs.edit().clear().apply()}
-    override fun onDestroy(){audio.unregisterAudioDeviceCallback(routes);rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
+    override fun onDestroy(){audio.unregisterAudioDeviceCallback(routes);rtc?.push(false);unadvertise();recovery?.let{try{getSystemService(NsdManager::class.java).stopServiceDiscovery(it)}catch(_:Exception){}};http?.close();cloudWork.shutdownNow();work.shutdownNow();rtc?.close();wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()};getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);audio.mode=AudioManager.MODE_NORMAL;instance=null;state=JSONObject().put("phase","idle");super.onDestroy()}
     private fun pack(q:JSONObject):String {val out=java.io.ByteArrayOutputStream();DeflaterOutputStream(out).use{it.write(q.toString().toByteArray())};return Base64.encodeToString(out.toByteArray(),Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)}
     private fun unpack(s:String):JSONObject {require(s.length<18000);val stream=InflaterInputStream(java.io.ByteArrayInputStream(Base64.decode(s,Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)));val out=java.io.ByteArrayOutputStream();val b=ByteArray(1024);stream.use{while(true){val n=it.read(b);if(n<0)break;require(out.size()+n<=32768);out.write(b,0,n)}};return JSONObject(out.toString("UTF-8"))}
 }

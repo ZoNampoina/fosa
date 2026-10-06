@@ -1,6 +1,6 @@
-# FOSA Mobile 0.11 — Native LAN Intercom
+# FOSA Mobile 0.12 — Code-Only LAN Pairing
 
-Android bénéficie d’une nouvelle interface Compose et d’un intercom privé entre téléphones : un téléphone crée la session, les autres rejoignent sur le même Wi-Fi/hotspot, sans PC, MR18 ou login cloud. Audio direct Opus/SRTP, Talk All/User/Group/Leader, Panic Mute, sessions par code/QR, découverte LAN et service d’écoute en arrière-plan.
+FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android reste entièrement LAN/offline ; le Web utilise un rendez-vous HTTPS éphémère uniquement pour échanger l’offre/réponse initiale, puis l’audio Opus/SRTP et les commandes restent directs sur le LAN.
 
 - **Android Native :** [APK FOSA](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
 - **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage QR avec un hôte Android, page ouverte pendant l’audio.

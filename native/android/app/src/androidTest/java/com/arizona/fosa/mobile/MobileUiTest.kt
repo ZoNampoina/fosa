@@ -23,7 +23,7 @@ class MobileUiTest {
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
         ui.waitUntil(5000){ui.onAllNodesWithTag("home-create").fetchSemanticsNodes().isNotEmpty()}
-        shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Find your\nconnection.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
+        shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Enter the code.\nThat\'s all.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
         peer=NativePeerFixture(ctx,MobileService.state)
