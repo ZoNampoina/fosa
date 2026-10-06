@@ -1,6 +1,6 @@
-# FOSA Mobile 0.12.1 — Bodypack, Talk et reconnexion
+# FOSA Mobile 0.12.2 — Audio mobile et Hold to Talk
 
-Les correctifs 0.12.1 rendent les erreurs Bodypack visibles, protègent le maintien de Talk contre le défilement, activent le micro sans fermer la liaison et réutilisent les identifiants privés à la reconnexion. Mettre à jour l’hôte Android ainsi que ses clients.
+0.12.2 corrige deux pannes mobiles liées : une erreur audio transitoire ne bloque plus le Push-to-Talk de l’intercom, et le Bodypack conserve le microphone armé pendant la synchronisation des autorisations Talk. Les sockets Bodypack HTTP/UDP sont attachées au réseau LAN menant au PC pour éviter un mauvais routage via les données mobiles. Mettre à jour l’APK Android ; pour le Bodypack, conserver également le bridge PC à jour.
 
 FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android reste entièrement LAN/offline ; le Web utilise un rendez-vous HTTPS éphémère uniquement pour échanger l’offre/réponse initiale, puis l’audio Opus/SRTP et les commandes restent directs sur le LAN.
 
