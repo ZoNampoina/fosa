@@ -39,6 +39,7 @@ class BodypackActivity : ComponentActivity() {
     private var loadAttempt=0
     private val main=Handler(Looper.getMainLooper())
     private var discovery: NsdManager.DiscoveryListener? = null
+    private var discoveryGeneration=0
     private var nsd: NsdManager? = null
     private val prefs by lazy { getSharedPreferences("bodypack",MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,6 +97,7 @@ class BodypackActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent:Intent) { super.onNewIntent(intent); setIntent(intent); intent.data?.let{url->AudioModeSwitch.toBodypack(this,{open(url.toString())},{failedLoad(it)})} }
     private fun open(value:String) {
+        stopDiscovery()
         try {
             var text=value.trim()
             if(text.startsWith("fosa://")) {
@@ -122,22 +124,27 @@ class BodypackActivity : ComponentActivity() {
         } catch(e:Exception) { controls=true;message=e.message ?: "Adresse invalide" }
     }
     private fun failedLoad(cause:String){loadFailed=true;loading=false;pageRequested=false;controls=true;message=cause}
+    private fun stopDiscovery(){discoveryGeneration++;val listener=discovery;discovery=null
+        if(listener!=null)try{nsd?.stopServiceDiscovery(listener)}catch(_:Exception){}
+    }
     private fun discover() {
-        if(discovery!=null)return
+        stopDiscovery();val generation=discoveryGeneration
         controls=true
         nsd=getSystemService(NsdManager::class.java)
         devices.clear(); message="Recherche FOSA STAGE… IP manuelle disponible si multicast bloqué."
         discovery=object:NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(type:String){}
-            override fun onDiscoveryStopped(type:String){ discovery=null }
-            override fun onStartDiscoveryFailed(type:String,code:Int){ runOnUiThread{message="Détection indisponible ($code). Utilise l’IP du PC."}; discovery=null }
-            override fun onStopDiscoveryFailed(type:String,code:Int){ discovery=null }
+            override fun onDiscoveryStopped(type:String){if(generation==discoveryGeneration)discovery=null}
+            override fun onStartDiscoveryFailed(type:String,code:Int){runOnUiThread{if(generation==discoveryGeneration){message="Détection indisponible ($code). Utilise l’IP du PC.";discovery=null}}}
+            override fun onStopDiscoveryFailed(type:String,code:Int){if(generation==discoveryGeneration)discovery=null}
             override fun onServiceLost(info:NsdServiceInfo){}
             override fun onServiceFound(info:NsdServiceInfo) {
+                if(generation!=discoveryGeneration)return
                 @Suppress("DEPRECATION")
                 nsd?.resolveService(info,object:NsdManager.ResolveListener {
                     override fun onResolveFailed(service:NsdServiceInfo,code:Int){}
                     override fun onServiceResolved(service:NsdServiceInfo) { runOnUiThread {
+                        if(generation!=discoveryGeneration)return@runOnUiThread
                         val ip=service.host?.hostAddress ?: return@runOnUiThread
                         if(ip.contains(':'))return@runOnUiThread
                         val item=service.serviceName to "http://$ip:${service.port}";if(item !in devices)devices.add(item)
@@ -147,7 +154,7 @@ class BodypackActivity : ComponentActivity() {
             }
         }
         nsd?.discoverServices("_fosa._tcp.",NsdManager.PROTOCOL_DNS_SD,discovery)
-        main.postDelayed({if(devices.isEmpty()&&controls&&!loading)message="Aucun serveur PC détecté. Lance FOSA SERVER et START LOW LATENCY, puis saisis l’IP affichée sur le PC."},6000)
+        main.postDelayed({if(generation==discoveryGeneration&&devices.isEmpty()&&controls&&!loading)message="Aucun serveur PC détecté. Lance FOSA SERVER et START LOW LATENCY, puis saisis l’IP affichée sur le PC."},6000)
     }
     inner class NativeAudio {
         @JavascriptInterface fun start(server:String,token:String,targetMs:Int):Boolean {
@@ -172,5 +179,5 @@ class BodypackActivity : ComponentActivity() {
             startService(Intent(this,BodypackService::class.java).setAction("MIC"))
     }
     override fun onPause() { super.onPause(); BodypackService.instance?.talk=false }
-    override fun onDestroy() { main.removeCallbacksAndMessages(null);discovery?.let{ try{nsd?.stopServiceDiscovery(it)}catch(_:Exception){} }; web.removeJavascriptInterface("FosaAndroid"); web.destroy(); super.onDestroy() }
+    override fun onDestroy() { main.removeCallbacksAndMessages(null);stopDiscovery();web.removeJavascriptInterface("FosaAndroid"); web.destroy(); super.onDestroy() }
 }

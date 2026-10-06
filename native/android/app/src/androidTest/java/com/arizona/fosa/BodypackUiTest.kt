@@ -58,6 +58,8 @@ class BodypackUiTest {
             ui.onNodeWithTag("bodypack-connect").performScrollTo().performClick()
             ui.waitUntil(10000){ui.onAllNodes(hasTestTag("bodypack-message") and hasText("HTTP 503",substring=true)).fetchSemanticsNodes().isNotEmpty()}
             ui.onNodeWithTag("bodypack-message").performScrollTo().assertIsDisplayed()
+            Thread.sleep(6500) // a late discovery timeout must not replace HTTP errors
+            ui.onNodeWithText("HTTP 503",substring=true).performScrollTo().assertIsDisplayed()
             ui.onNodeWithTag("bodypack-address").performScrollTo().performTextReplacement("https://example.com")
             ui.onNodeWithTag("bodypack-connect").performScrollTo().performClick()
             ui.onNodeWithText("Adresse LAN privée requise").performScrollTo().assertIsDisplayed()
