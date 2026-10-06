@@ -2,6 +2,8 @@ package com.arizona.fosa.mobile
 
 import android.content.Context
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONObject
 import org.webrtc.*
 import org.webrtc.audio.JavaAudioDeviceModule
@@ -26,6 +28,11 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Volatile var level:Double?=null;private set
     @Volatile var master=0.75;private set
     private val memberMutes=ConcurrentHashMap<String,Boolean>()
+    private val callbacks=Handler(Looper.getMainLooper())
+    @Volatile private var closed=false
+    // JNI may invoke observers on its signalling thread while a caller holds
+    // our lock and waits for that same thread. Never acquire it in an observer.
+    private fun defer(action:()->Unit){callbacks.post{if(!closed)action()}}
     private var sampleTime=0L
     private val adm:JavaAudioDeviceModule
     private val factory:PeerConnectionFactory
@@ -34,9 +41,9 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
         adm=JavaAudioDeviceModule.builder(ctx).setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setSampleRate(48000)
             .setAudioRecordErrorCallback(object:JavaAudioDeviceModule.AudioRecordErrorCallback {
-                override fun onWebRtcAudioRecordInitError(message:String){error="Microphone indisponible : $message";push(false);changed()}
-                override fun onWebRtcAudioRecordStartError(code:JavaAudioDeviceModule.AudioRecordStartErrorCode,message:String){error="Microphone arrêté : $message";push(false);changed()}
-                override fun onWebRtcAudioRecordError(message:String){error="Capture perdue : $message";push(false);changed()}
+                override fun onWebRtcAudioRecordInitError(message:String){error="Microphone indisponible : $message";defer{push(false);changed()}}
+                override fun onWebRtcAudioRecordStartError(code:JavaAudioDeviceModule.AudioRecordStartErrorCode,message:String){error="Microphone arrêté : $message";defer{push(false);changed()}}
+                override fun onWebRtcAudioRecordError(message:String){error="Capture perdue : $message";defer{push(false);changed()}}
             })
             .setAudioTrackStateCallback(object:JavaAudioDeviceModule.AudioTrackStateCallback {
                 override fun onWebRtcAudioTrackStart(){playing=true}
@@ -89,7 +96,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         var observed:Link?=null
         val pc=factory.createPeerConnection(config,object:PeerConnection.Observer {
             override fun onSignalingChange(s:PeerConnection.SignalingState){}
-            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{val wasConnected=it.connected;it.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;if(wasConnected&&!it.connected)push(false);changed()} }
+            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->val wasConnected=link.connected;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;if(wasConnected&&!link.connected)defer{if(links[id]===link&&!link.connected)push(false)};changed()} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
             override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp))signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}
@@ -112,8 +119,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     })}
     private fun send(c:DataChannel,j:JSONObject){if(c.state()==DataChannel.State.OPEN)c.send(DataChannel.Buffer(ByteBuffer.wrap(j.toString().toByteArray()),false))}
     private fun observer(created:((SessionDescription)->Unit)?=null,done:(()->Unit)?=null)=object:SdpObserver {
-        override fun onCreateSuccess(s:SessionDescription){created?.invoke(s)}
-        override fun onSetSuccess(){done?.invoke()}
+        override fun onCreateSuccess(s:SessionDescription){defer{created?.invoke(s)}}
+        override fun onSetSuccess(){defer{done?.invoke()}}
         override fun onCreateFailure(s:String){changed()}
         override fun onSetFailure(s:String){changed()}
     }
@@ -134,5 +141,5 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     };l.stats=out;changed() }}}
     @Synchronized fun reset(){push(false);links.keys.toList().forEach{remove(it)}}
     @Synchronized private fun remove(id:String){links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
-    @Synchronized fun close(){reset();source?.dispose();factory.dispose();adm.release()}
+    @Synchronized fun close(){if(closed)return;closed=true;callbacks.removeCallbacksAndMessages(null);reset();source?.dispose();factory.dispose();adm.release()}
 }

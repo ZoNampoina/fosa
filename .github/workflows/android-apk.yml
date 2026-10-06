@@ -5,6 +5,7 @@ on:
     paths:
       - 'native/android/**'
       - '.github/workflows/android-apk.yml'
+      - '.github/scripts/android-verify.sh'
 permissions:
   contents: write
 concurrency:

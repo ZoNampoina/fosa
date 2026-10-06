@@ -43,7 +43,7 @@ class BodypackUiTest {
         }}catch(_:Exception){}}.apply{start()}
         val ip=LanAddress.ip(ctx) ?: throw AssertionError("Emulator LAN address required")
         val address="http://$ip:${server.localPort}"
-        val monitor=inst.addMonitor(BodypackActivity::class.java.name,null,false)
+        var monitor=inst.addMonitor(BodypackActivity::class.java.name,null,false)
         try{
             ui.waitUntil(5000){ui.onAllNodesWithTag("home-bodypack").fetchSemanticsNodes().isNotEmpty()}
             ui.onNodeWithTag("home-bodypack").performScrollTo().performClick()
@@ -70,6 +70,8 @@ class BodypackUiTest {
             ui.onNodeWithTag("home-create").performScrollTo().performClick();ui.onNodeWithTag("submit-session").performScrollTo().performClick()
             ui.waitUntil(15000){MobileService.state.optBoolean("controlConnected")}
             assertNotNull(MobileService.instance)
+            // waitForMonitorWithTimeout consumes its monitor; register again.
+            inst.removeMonitor(monitor);monitor=inst.addMonitor(BodypackActivity::class.java.name,null,false)
             status.set(200);ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithTag("settings-bodypack").performScrollTo().performClick()
             opened=inst.waitForMonitorWithTimeout(monitor,5000) as? BodypackActivity
             assertNotNull(opened);ui.waitUntil(10000){MobileService.instance==null}
