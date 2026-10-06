@@ -38,6 +38,7 @@ class MobileService:Service() {
     private var rendezvousSecret="";private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
     private val rendezvousUrl="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous"
     private val rendezvousKey="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3"
+    private val rendezvousIceCounts=ConcurrentHashMap<String,Int>()
     private val prefs by lazy{getSharedPreferences("mobile-session",MODE_PRIVATE)}
     private val audio by lazy{getSystemService(AudioManager::class.java)}
     override fun onBind(i:Intent?):IBinder?=null
@@ -157,9 +158,21 @@ class MobileService:Service() {
         return pack(JSONObject().put("type","answer").put("sdp",LanAddress.sdp(sdp)).put("ice",ice).put("profile",p).put("host",profile.getString("id")))
     }
     private fun finishCloudPair(requestId:String,id:String,p:JSONObject,attempt:Int=0){
-        main.postDelayed({enqueue{try{
-            val answer=pairingAnswer(id,p);rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
-        }catch(_:Exception){if(attempt<20&&rtc?.links?.containsKey(id)==true)finishCloudPair(requestId,id,p,attempt+1) else rendezvousSeen.remove(requestId)}}},if(attempt==0)500 else 200)
+        main.postDelayed({enqueue{
+            val link=rtc?.links?.get(id)
+            if(link==null){rendezvousAnswers.remove(requestId);rendezvousIceCounts.remove(requestId);rendezvousSeen.remove(requestId);return@enqueue}
+            try{
+                val count=link.localIce.size
+                if(count>0&&(attempt==0||rendezvousIceCounts[requestId]!=count)){
+                    val answer=pairingAnswer(id,p);rendezvousIceCounts[requestId]=count;rendezvousAnswers[requestId]=answer;postRendezvousAnswer(requestId,answer)
+                }
+                if(link.connected||attempt>=24){rendezvousAnswers.remove(requestId);rendezvousIceCounts.remove(requestId);rendezvousSeen.remove(requestId)}
+                else finishCloudPair(requestId,id,p,attempt+1)
+            }catch(_:Exception){
+                if(attempt<24)finishCloudPair(requestId,id,p,attempt+1)
+                else {rendezvousAnswers.remove(requestId);rendezvousIceCounts.remove(requestId);rendezvousSeen.remove(requestId)}
+            }
+        }},if(attempt==0)450 else 350)
     }
     private fun finishOfflinePair(id:String,p:JSONObject,attempt:Int=0){
         main.postDelayed({enqueue{try{
@@ -174,7 +187,7 @@ class MobileService:Service() {
         finishCloudPair(requestId,id,p)
     }catch(_:Exception){rendezvousSeen.remove(requestId)}}
     private fun postRendezvousAnswer(requestId:String,answer:String){if(cloudWork.isShutdown)return;cloudWork.execute{try{
-        val host=room ?: return@execute;rendezvousRequest(JSONObject().put("action","host-answer").put("code",host.code).put("secret",rendezvousSecret).put("id",requestId).put("answer",answer));rendezvousAnswers.remove(requestId);rendezvousSeen.remove(requestId)
+        val host=room ?: return@execute;rendezvousRequest(JSONObject().put("action","host-answer").put("code",host.code).put("secret",rendezvousSecret).put("id",requestId).put("answer",answer))
     }catch(_:Exception){}}}
     private fun tick(){try {
         val engine=rtc ?: return
