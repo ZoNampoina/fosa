@@ -27,13 +27,23 @@ class StartupCaptureTest {
         val scenario=ActivityScenario.launch<MobileActivity>(Intent(ctx,MobileActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         try {
             ui.mainClock.advanceTimeByFrame()
-            ui.onNodeWithTag("splash-screen").assertIsDisplayed()
+            val shownDeadline=System.currentTimeMillis()+5000
+            var shown=false
+            while(!shown&&System.currentTimeMillis()<shownDeadline){
+                try{ui.onNodeWithTag("splash-screen").assertIsDisplayed();shown=true}catch(_:AssertionError){Thread.sleep(50)}
+            }
+            assertTrue("Splash screen did not become visible",shown)
             ui.onNodeWithText("NETWORK AUDIO SYSTEM").assertExists()
-            val bitmap=ui.onNodeWithTag("splash-screen").captureToImage().asAndroidBitmap()
-            assertTrue(bitmap.width>0&&bitmap.height>0)
+            var bitmap:Bitmap?=null
+            val captureDeadline=System.currentTimeMillis()+3000
+            while(bitmap==null&&System.currentTimeMillis()<captureDeadline){
+                try{bitmap=ui.onNodeWithTag("splash-screen").captureToImage().asAndroidBitmap()}catch(_:IllegalArgumentException){Thread.sleep(75)}
+            }
+            val captured=bitmap ?: error("Splash window surface unavailable")
+            assertTrue(captured.width>0&&captured.height>0)
             val values=android.content.ContentValues().apply{put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"00-splash.png");put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/png");put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/FOSA-screenshots")}
             val uri=ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values) ?: error("Capture storage unavailable")
-            ctx.contentResolver.openOutputStream(uri)!!.use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+            ctx.contentResolver.openOutputStream(uri)!!.use{captured.compress(Bitmap.CompressFormat.PNG,100,it)}
             ui.mainClock.autoAdvance=true
             ui.mainClock.advanceTimeBy(FosaMotion.StartupMs+32)
             ui.onNodeWithTag("home-create").assertIsDisplayed()
