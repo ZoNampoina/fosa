@@ -36,7 +36,7 @@ class BodypackLifecycleTest {
         instrumentation.uiAutomation.executeShellCommand("pm grant ${context.packageName} android.permission.POST_NOTIFICATIONS").close()
         val server=ServerSocket(0,10,InetAddress.getByName("127.0.0.1"))
         val udp=DatagramSocket(0,InetAddress.getByName("127.0.0.1"));udp.soTimeout=500
-        val active=AtomicBoolean(true);val talkPackets=AtomicInteger(0)
+        val active=AtomicBoolean(true);val talkPackets=AtomicInteger(0);val allowTalk=AtomicBoolean(true)
         val delayControl=AtomicBoolean(false);val delayedControls=AtomicInteger(0)
         val id=ByteArray(8){it.toByte()};val receiveKey=ByteArray(32){(it+1).toByte()};val sendKey=ByteArray(32){(it+2).toByte()}
         fun hex(bytes:ByteArray)=bytes.joinToString(""){"%02x".format(it.toInt() and 255)}
@@ -49,7 +49,7 @@ class BodypackLifecycleTest {
                     while(true){val line=readLine(input) ?: break;if(line.isEmpty())break;if(line.startsWith("Content-Length:",true))size=line.substringAfter(':').trim().toInt()}
                     if(size>0){val body=ByteArray(size);var offset=0;while(offset<size){val n=input.read(body,offset,size-offset);if(n<0)break;offset+=n}}
                     if(first.contains("/api/control")&&delayControl.compareAndSet(true,false)){delayedControls.incrementAndGet();Thread.sleep(3200)}
-                    val result=if(first.contains("/api/native"))JSONObject().put("port",udp.localPort).put("streamId",hex(id)).put("receiveKey",hex(receiveKey)).put("sendKey",hex(sendKey)).put("profile",JSONObject().put("name","EMULATOR TEST")) else JSONObject().put("ok",true).put("talkAllowed",true).put("talkActive",true)
+                    val result=if(first.contains("/api/native"))JSONObject().put("port",udp.localPort).put("streamId",hex(id)).put("receiveKey",hex(receiveKey)).put("sendKey",hex(sendKey)).put("profile",JSONObject().put("name","EMULATOR TEST")) else JSONObject().put("ok",true).put("talkAllowed",allowTalk.get()).put("talkActive",allowTalk.get())
                     val bytes=result.toString().toByteArray()
                     client.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray()+bytes)
                 }
@@ -88,9 +88,23 @@ class BodypackLifecycleTest {
             assertEquals("Receive target must survive initial service creation",4,service.targetPackets)
             scenario.onActivity { service.armMic() }
             await("Native microphone should arm") { service.micArmed }
-            service.talk=true
+            service.controlTalk(true,"all")
             await("Talkback UDP must remain concurrent with playback") { talkPackets.get()>5 && service.status().optBoolean("playback") }
-            service.talk=false
+            service.controlTalk(false,"all")
+            allowTalk.set(false)
+            await("Revoked Talk permission must not disarm the microphone") {
+                val status=service.status()
+                !status.optBoolean("talkAuthorized")&&status.optBoolean("mic")
+            }
+            val beforePermissionRestore=talkPackets.get()
+            service.controlTalk(true,"all")
+            assertFalse("Held Talk must wait safely while permission is stale",service.status().optBoolean("talk"))
+            allowTalk.set(true)
+            await("Held Talk must start as soon as server permission refreshes") {
+                val status=service.status()
+                status.optBoolean("talkAuthorized")&&status.optBoolean("talk")&&status.optBoolean("mic")&&talkPackets.get()>beforePermissionRestore+5
+            }
+            service.controlTalk(false,"all")
             val priorControlFailures=service.status().optLong("controlFailures")
             delayControl.set(true)
             scenario.onActivity { it.moveTaskToBack(true) }

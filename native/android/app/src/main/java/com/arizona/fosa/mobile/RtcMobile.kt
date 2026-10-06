@@ -46,8 +46,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
                 override fun onWebRtcAudioRecordError(message:String){error="Capture perdue : $message";defer{push(false);changed()}}
             })
             .setAudioTrackStateCallback(object:JavaAudioDeviceModule.AudioTrackStateCallback {
-                override fun onWebRtcAudioTrackStart(){playing=true}
-                override fun onWebRtcAudioTrackStop(){playing=false}
+                override fun onWebRtcAudioTrackStart(){playing=true;if(error.startsWith("Sortie audio"))error="";changed()}
+                override fun onWebRtcAudioTrackStop(){playing=false;changed()}
             })
             .setAudioTrackErrorCallback(object:JavaAudioDeviceModule.AudioTrackErrorCallback {
                 override fun onWebRtcAudioTrackInitError(message:String){error="Sortie audio indisponible : $message";changed()}
@@ -58,6 +58,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             .setUseHardwareAcousticEchoCanceler(JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
             .setUseHardwareNoiseSuppressor(JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
             .setSamplesReadyCallback { a ->
+                if(error.startsWith("Microphone")||error.startsWith("Capture"))error=""
                 val now=System.nanoTime();if(now-sampleTime>150000000L){sampleTime=now;val data=a.data;val b=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);var sum=0.0;var count=0;while(b.remaining()>=2){val v=b.short/32768.0;sum+=v*v;count++};level=if(count>0)max(-120.0,20*log10(max(1e-6,sqrt(sum/count)))) else null}
             }.createAudioDeviceModule()
         factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
@@ -69,7 +70,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         links.forEach{(id,l)->val track=factory.createAudioTrack("mic-$id",source!!);track.setEnabled(false);l.track=track;l.pc.addTrack(track,listOf("fosa"));offer(id)}
         changed()
     }
-    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&error.isEmpty()&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
+    fun microphoneReady():Boolean=source!=null
+    @Synchronized fun push(active:Boolean,destination:String=target){target=destination;talking=active&&!muted&&source!=null&&links.any{it.value.connected&&eligible(it.key)};links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))};changed()}
     private fun eligible(id:String):Boolean = target=="all"||target=="user:$id"||target=="leader"&&roster.any{it.optString("id")==id&&it.optBoolean("leader")}||target.startsWith("group:")&&roster.any{it.optString("id")==id&&it.optString("group")==target.removePrefix("group:")}
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)push(false);changed()}
     @Synchronized fun volume(value:Double){master=if(value.isFinite())value.coerceIn(0.0,1.0) else 0.0;links.values.forEach{it.received?.setVolume(master)}}

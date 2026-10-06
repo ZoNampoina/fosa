@@ -1,4 +1,4 @@
-# FOSA Mobile — Android / Web 0.12.1
+# FOSA Mobile — Android 0.12.2 / Web 0.12.1
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
@@ -21,8 +21,8 @@ Premier test : écouteurs filaires → monter CH1 → Monitor Gain → maintenir
 
 Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Un timeout temporaire du contrôle ne ferme plus le flux UDP authentifié ; Talk se coupe jusqu’au rétablissement des autorisations. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
 
-**Mise à jour 0.12.1**
-Installer l’APK sur l’hôte et les clients Android ; rouvrir la page Web pour charger le nouveau cache. Redémarrer la session après la mise à jour de l’hôte. Maintenir HOLD TO TALK pendant la parole ; autoriser le microphone si demandé. Après une perte de liaison, reconnecter le même appareil avec le même code : son identité et son groupe sont réutilisés, son audio est renégocié. Ne pas effacer les données de l’application ou du site pour une simple reconnexion.
+**Mise à jour 0.12.2**
+Installer l’APK 0.12.2 sur les Android concernés. Dans FOSA Mobile, une erreur de sortie audio transitoire n’interdit plus HOLD TO TALK et le micro peut être réactivé sans recréer la session. Dans Bodypack, le micro reste armé lorsque l’autorisation Talk du PC est encore en cours de rafraîchissement ; si l’utilisateur maintient Talk, l’émission démarre dès que le serveur confirme le droit. Le trafic Bodypack est explicitement routé sur le Wi-Fi/Ethernet local menant au PC, même si les données mobiles restent actives.
 
 **First physical test**
 Android host + Android client → Talk User → Talk All → wired headphones → unplug router WAN → verify speech continues → screen off/on → stop/rejoin Wi-Fi → Panic Mute. Try the same with PWA only after native path succeeds. A guest network or AP isolation may prevent direct connections. Router/hotspot hardware is not available in the development environment; these tests remain to be run physically.

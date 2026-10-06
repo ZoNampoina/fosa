@@ -6,7 +6,7 @@ android {
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     namespace = "com.arizona.fosa"
     compileSdk = 35
-    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 13; versionName = "0.12.1"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 14; versionName = "0.12.2"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
