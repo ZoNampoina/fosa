@@ -38,6 +38,7 @@ class FosaConnectionManager(private val ctx:Context,private val changed:(Connect
     }
     fun resolve(code:String,preferred:String="",sessionId:String=""):LocalSession {
         require(code.matches(Regex("[0-9]{6}"))){"Code session à 6 chiffres requis"}
+        transport=TransportKind.LAN
         phase(ConnectionPhase.DISCOVERING)
         if(preferred.isNotBlank())probe(preferred,code,sessionId)?.let{return it}
         LanAddress.gateway(ctx)?.let{probe("http://$it:48765",code,sessionId)?.let{return it}}
