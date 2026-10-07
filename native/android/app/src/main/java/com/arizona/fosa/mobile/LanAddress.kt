@@ -19,6 +19,7 @@ object LanAddress {
             local&&cm.getLinkProperties(n)?.routes?.any{r->r.destination.contains(target)}==true
         } ?: wifi(ctx)
     }
+    fun gateway(ctx:Context):String? { val cm=ctx.getSystemService(ConnectivityManager::class.java);val n=wifi(ctx) ?: return null;return cm.getLinkProperties(n)?.routes?.firstOrNull{r->r.isDefaultRoute&&r.gateway?.hostAddress?.let{privateV4(it)}==true}?.gateway?.hostAddress }
     fun ip(ctx:Context):String? { val cm=ctx.getSystemService(ConnectivityManager::class.java);wifi(ctx)?.let{cm.getLinkProperties(it)?.linkAddresses?.firstOrNull{a->privateV4(a.address.hostAddress ?: "")}?.let{a->return a.address.hostAddress}}
         return NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.firstOrNull{privateV4(it)}
     }
