@@ -8,15 +8,15 @@ import java.net.NetworkInterface
 object LanAddress {
     fun privateV4(value:String):Boolean { val n=value.split('.').map{it.toIntOrNull()};return n.size==4&&n.all{it!=null&&it in 0..255}&&(n[0]==10||n[0]==192&&n[1]==168||n[0]==172&&n[1] in 16..31) }
     fun privateV6(value:String):Boolean {val v=value.substringBefore('%').lowercase();return v.startsWith("fc")||v.startsWith("fd")||Regex("^fe[89ab]").containsMatchIn(v)}
-    fun wifi(ctx:Context):Network? { val cm=ctx.getSystemService(ConnectivityManager::class.java);return cm.allNetworks.firstOrNull{val c=cm.getNetworkCapabilities(it);c?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true||c?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)==true} }
+    private fun local(c:NetworkCapabilities?):Boolean = c!=null&&!c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)&&!c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)&&(c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+    fun wifi(ctx:Context):Network? { val cm=ctx.getSystemService(ConnectivityManager::class.java);return cm.allNetworks.firstOrNull{local(cm.getNetworkCapabilities(it))} }
     fun forHost(ctx:Context,host:String):Network? {
         val cm=ctx.getSystemService(ConnectivityManager::class.java)
         val target=try{InetAddress.getByName(host)}catch(_:Exception){return wifi(ctx)}
         if(target.isLoopbackAddress)return null
         return cm.allNetworks.firstOrNull{n->
             val caps=cm.getNetworkCapabilities(n)
-            val local=caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true||caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)==true
-            local&&cm.getLinkProperties(n)?.routes?.any{r->!r.isDefaultRoute&&r.destination.contains(target)}==true
+            local(caps)&&cm.getLinkProperties(n)?.routes?.any{r->!r.isDefaultRoute&&r.destination.contains(target)}==true
         }
     }
     fun gateway(ctx:Context):String? { val cm=ctx.getSystemService(ConnectivityManager::class.java);val n=wifi(ctx) ?: return null;return cm.getLinkProperties(n)?.routes?.firstOrNull{r->r.isDefaultRoute&&r.gateway?.hostAddress?.let{privateV4(it)}==true}?.gateway?.hostAddress }
@@ -38,7 +38,7 @@ object LanAddress {
         val ip=value.trim().split(Regex("\\s+")).getOrNull(4) ?: return false
         if(ip.endsWith(".local"))return true
         return try{val cm=ctx.getSystemService(ConnectivityManager::class.java)
-            val networkAddresses=cm.allNetworks.filter{n->cm.getNetworkCapabilities(n)?.let{it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)}==true}.flatMap{cm.getLinkProperties(it)?.linkAddresses.orEmpty()}.mapNotNull{it.address.hostAddress}
+            val networkAddresses=cm.allNetworks.filter{n->local(cm.getNetworkCapabilities(n))}.flatMap{cm.getLinkProperties(it)?.linkAddresses.orEmpty()}.mapNotNull{it.address.hostAddress}
             ip in networkAddresses||NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|p2p|ap\\d|swlan|eth).*"))}.any{n->n.inetAddresses.toList().any{it.hostAddress==ip}}
         }catch(_:Exception){false}
     }
