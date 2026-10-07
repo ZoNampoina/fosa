@@ -2,7 +2,7 @@
 This version is separate from the MR18/PC Bodypack PCM engine. A phone coordinates a Mobile session; Opus audio flows directly between peers, never through its HTTP coordinator or the Internet.
 
 ## Discovery and control
-Bonjour/mDNS `_fosa-mobile._tcp.` announces the session name, LAN IPv4, port and public session UUID. Private RFC1918 IPv4 only; no cellular/Internet dependency. Clients may use Ethernet. A hotspot is usable if its firmware permits local client traffic. Native Android joins by six-digit code only: it discovers `_fosa-mobile._tcp.` hosts and tries the authenticated join locally until the matching host accepts the code. Manual address and QR remain advanced fallbacks.
+Native Android stays LAN-only by default. The host prefers local TCP port `48765`; a joining Android first probes the Wi-Fi/hotspot default gateway on that port, then also uses Bonjour/mDNS `_fosa-mobile._tcp.` discovery. This makes hotspot pairing less dependent on multicast while retaining mDNS on normal LANs. Private RFC1918 IPv4 only; no cellular/Internet dependency. Native Android joins by six-digit code only. Manual address and QR remain fallbacks.
 
 `POST /lan/info`, `/lan/join`, `/lan/poll`, `/lan/signal`, `/lan/group`, `/lan/leave`; UTF-8 JSON, 32 KiB maximum, bounded queues/timeouts. Join requires a six-digit code; eight failures/minute per remote are refused. Each member receives an unguessable token, ID, session name, leader ID, protocol. Poll, signal, group and leave authenticate `Authorization: Bearer <token>`. Roster never contains tokens. Maximum eight members. A member is online for seven seconds and a Talk indicator expires after 1.5 seconds without refresh. Inactive memberships leave active slots after 60 seconds when a new client joins; up to 64 retired identities remain resumable until the host session ends. Pairing reservations last 90 seconds.
 
@@ -21,12 +21,12 @@ RTT, inbound jitter and packet loss come from RTCStats. They do not measure mout
 ## Browser code rendezvous
 A cached HTTPS PWA cannot directly enumerate Android mDNS services or freely call the private HTTP coordinator. FOSA therefore uses a short-lived HTTPS rendezvous only for browser pairing.
 
-The Android host registers a hash of its six-digit code with a random host secret and refreshes it while the session is active. The browser submits its compressed LAN-only SDP offer against the code; the host polls the rendezvous and posts the compressed answer. Requests expire quickly and are rate-limited. The rendezvous carries no audio and no ongoing FOSA control traffic.
+The Android host does not poll the cloud during an ordinary native session. Opening MEMBERS → CODE / QR temporarily enables Web code pairing. During that window the host registers a hash of its six-digit code with a random host secret; the browser submits its compressed LAN-only SDP offer and the host posts the answer plus newly gathered LAN ICE candidates until the direct link opens. Requests expire quickly and are rate-limited. The rendezvous carries no audio and no ongoing FOSA control traffic.
 
-After the answer is applied, the browser's encrypted WebRTC data channel becomes the coordinator RPC and Opus/SRTP audio remains peer-to-peer on the LAN. Loss of Internet after pairing does not route audio through Supabase.
+After the answer is applied, the browser's encrypted WebRTC data channel becomes the coordinator RPC and Opus/SRTP audio remains peer-to-peer on the LAN. Loss of Internet after pairing does not route audio through Supabase. A normal Web repair performs an ICE restart while that data channel still exists; after a complete link loss or network-address change, the Web fallback may require re-pairing because browsers cannot rediscover the private coordinator by code alone.
 
 ### Offline browser fallback
-When the rendezvous cannot be reached, the previous local QR offer/answer exchange remains available under Offline QR. It is a compatibility path, not the default user flow.
+When Internet is unavailable, the QR offer/answer exchange provides a fully local Web pairing path. Because a browser cannot enumerate Android mDNS services or derive a private host from a six-digit code, zero-Internet + code-only pairing is guaranteed only for native clients.
 
 ## Security boundary
 The coordinator is HTTP on the private LAN; join codes and native tokens are not protected against a hostile LAN observer. Use a trusted dedicated network. Audio and browser RPC are encrypted; this release is not suitable for untrusted public networks. TLS/pinning, per-device admission and robust host failover remain P2. No login cloud is used.
