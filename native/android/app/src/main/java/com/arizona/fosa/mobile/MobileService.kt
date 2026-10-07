@@ -36,6 +36,7 @@ class MobileService:Service() {
     private var pairAnswer="";private val manual=mutableSetOf<String>();private var networkIp=""
     private val cloudWork=Executors.newSingleThreadExecutor();private val cloudBusy=java.util.concurrent.atomic.AtomicBoolean(false)
     private var rendezvousSecret="";private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
+    private val preferredLanPort=48765
     private val rendezvousUrl="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous"
     private val rendezvousKey="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3"
     private val rendezvousIceCounts=ConcurrentHashMap<String,Int>()
@@ -71,7 +72,7 @@ class MobileService:Service() {
         phase="Connexion locale";publish()
         if(i.getBooleanExtra("host",false)){
             room=LanSession(i.getStringExtra("session") ?: "BAND LIVE",i.getStringExtra("name") ?: "Musicien",i.getStringExtra("role") ?: "")
-            http=LanHttp(networkIp,room!!);address="http://$networkIp:${http!!.port}";profile=room!!.ticket(room!!.owner);rendezvousSecret=java.util.UUID.randomUUID().toString()+java.util.UUID.randomUUID();advertise()
+            http=try{LanHttp(networkIp,room!!,preferredLanPort)}catch(_:Exception){LanHttp(networkIp,room!!)};address="http://$networkIp:${http!!.port}";profile=room!!.ticket(room!!.owner);rendezvousSecret=java.util.UUID.randomUUID().toString()+java.util.UUID.randomUUID();advertise()
         }else {
             val requestedCode=i.getStringExtra("code")?.trim() ?: ""
             require(requestedCode.matches(Regex("\\d{6}"))){"Code session à 6 chiffres requis"}
@@ -102,7 +103,7 @@ class MobileService:Service() {
     private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
     @Suppress("DEPRECATION") private fun discoverJoin(join:JSONObject):Pair<String,JSONObject> {
         phase="Recherche de la session par code";publish()
-        val nsd=getSystemService(NsdManager::class.java);val candidates=LinkedBlockingQueue<String>();val tried=mutableSetOf<String>()
+        val nsd=getSystemService(NsdManager::class.java);val candidates=LinkedBlockingQueue<String>();val tried=mutableSetOf<String>();LanAddress.gateway(this)?.let{candidates.offer("http://$it:$preferredLanPort")}
         val listener=object:NsdManager.DiscoveryListener{
             override fun onDiscoveryStarted(t:String){}
             override fun onDiscoveryStopped(t:String){}
@@ -125,7 +126,7 @@ class MobileService:Service() {
             }
         }finally{try{nsd.stopServiceDiscovery(listener)}catch(_:Exception){}}
         address=""
-        throw IllegalArgumentException(if(tried.isEmpty())"Aucune session FOSA détectée. Vérifie que tous les appareils sont sur le même Wi-Fi ou hotspot." else "Aucune session ne correspond à ce code. Vérifie les 6 chiffres puis réessaie.")
+        throw IllegalArgumentException(if(tried.isEmpty())"Aucune session FOSA détectée. Vérifie que tous les appareils sont sur le même Wi-Fi ou hotspot." else "Aucune session ne correspond à ce code sur la passerelle ou via mDNS. Vérifie les 6 chiffres puis réessaie.")
     }
     private fun request(path:String,b:JSONObject,token:String=""):JSONObject {
         val url=URL("$address/lan/$path");val c=(LanAddress.wifi(this)?.openConnection(url) ?: url.openConnection()) as java.net.HttpURLConnection
