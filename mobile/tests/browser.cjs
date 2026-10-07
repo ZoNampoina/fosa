@@ -55,8 +55,8 @@ try {
  await b.waitForFunction(()=>rms()>.01,{timeout:10000});await pause(500);assert((await c.evaluate(()=>rms()))<.005,'Private PTT must remain silent on other user');
  await host.evaluate(()=>{fosaMobile.destination('group:DRUMS');fosaMobile.push(true);});await b.waitForFunction(()=>rms()>.01,{timeout:10000});await pause(500);assert((await c.evaluate(()=>rms()))<.005,'Group PTT must remain silent outside the selected group');
  await host.evaluate(()=>{fosaMobile.destination('all');fosaMobile.push(true);});await c.waitForFunction(()=>rms()>.01,{timeout:10000});
- await c.evaluate(()=>fosaMobile.listen('user:10000000-0000-0000-0000-000000000000'));await c.waitForFunction(()=>rms()<.005,{timeout:10000});
- await c.evaluate(()=>fosaMobile.listen('leader'));await c.waitForFunction(()=>rms()>.01,{timeout:10000});await c.evaluate(()=>fosaMobile.listen('all'));
+ await c.evaluate(()=>fosaMobile.listen('user:10000000-0000-0000-0000-000000000000'));assert(await c.evaluate(()=>fosaMobile.links.get(fosaMobile.host).audio.muted),'Listen User must mute non-selected leader output');
+ await c.evaluate(()=>fosaMobile.listen('leader'));assert(await c.evaluate(()=>!fosaMobile.links.get(fosaMobile.host).audio.muted),'Listen Leader must restore leader output');assert((await c.evaluate(()=>rms()))>.01);await c.evaluate(()=>fosaMobile.listen('all'));
  // Real touch PTT must remain active through pointer motion and poll redraws.
  await host.evaluate(()=>fosaMobile.push(false));await b.waitForFunction(()=>rms()<.005,{timeout:10000});
  await host.locator('#ptt').scrollIntoViewIfNeeded();const touch=await ctx.newCDPSession(host),box=await host.locator('#ptt').boundingBox();
