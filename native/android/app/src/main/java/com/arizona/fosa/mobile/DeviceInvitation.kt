@@ -15,6 +15,8 @@ class DeviceInvitation(ctx:Context,name:String,role:String,accepted:(String)->Un
     val qr=PairingQr.device(id,nonce)
     private val expires=System.currentTimeMillis()+90000
     private val used=AtomicBoolean(false)
+    private val main=Handler(Looper.getMainLooper())
+    private val expire=Runnable{close()}
     private val manager=FosaConnectionManager(ctx){_,_,_->}
     private val server=LanHttp("0.0.0.0",null,pairing={path,q->
         require(path=="/pair/accept"&&System.currentTimeMillis()<expires){"Invitation expirée"}
@@ -24,6 +26,6 @@ class DeviceInvitation(ctx:Context,name:String,role:String,accepted:(String)->Un
         Handler(Looper.getMainLooper()).postDelayed({accepted(join)},300)
         JSONObject().put("ok",true)
     })
-    init{manager.announce(JSONObject().put("session",id).put("sessionName","Appareil $name").put("hostName",name).put("hostRole",role).put("device",true).put("port",server.port).put("version",com.arizona.fosa.BuildConfig.VERSION_NAME))}
-    override fun close(){used.set(true);server.close();manager.close()}
+    init{manager.announce(JSONObject().put("session",id).put("sessionName","Appareil $name").put("hostName",name).put("hostRole",role).put("device",true).put("port",server.port).put("version",com.arizona.fosa.BuildConfig.VERSION_NAME));main.postDelayed(expire,90000)}
+    override fun close(){main.removeCallbacks(expire);used.set(true);server.close();manager.close()}
 }
