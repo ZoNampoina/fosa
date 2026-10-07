@@ -23,6 +23,9 @@ import android.util.Base64
 class MobileService:Service() {
     companion object { @Volatile var instance:MobileService?=null;var state by mutableStateOf(JSONObject().put("phase","idle"));private set }
     private val main=Handler(Looper.getMainLooper())
+    // A P2P discovery/group operation can wait on the worker. Existing peers
+    // must still see their host online, and held Talk keeps its safety limit.
+    private val ownerBeat=object:Runnable{override fun run(){if(instance!==this@MobileService)return;val engine=rtc;val host=room;if(engine!=null&&host!=null){if(engine.talkRequested&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false);host.touchOwner(engine.talking,engine.target,engine.level);lastPoll=SystemClock.elapsedRealtime()};main.postDelayed(this,1000)}}
     private val publication=java.util.concurrent.atomic.AtomicLong();private var appliedPublication=0L
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var https:LanHttp?=null;private var rtc:RtcMobile?=null
@@ -47,7 +50,7 @@ class MobileService:Service() {
     private val prefs by lazy{getSharedPreferences("mobile-session",MODE_PRIVATE)}
     private val audio by lazy{getSystemService(AudioManager::class.java)}
     override fun onBind(i:Intent?):IBinder?=null
-    override fun onCreate(){super.onCreate();instance=this;audio.registerAudioDeviceCallback(routes,main);getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("fosa-mobile","FOSA Mobile",NotificationManager.IMPORTANCE_LOW))}
+    override fun onCreate(){super.onCreate();instance=this;main.post(ownerBeat);audio.registerAudioDeviceCallback(routes,main);getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("fosa-mobile","FOSA Mobile",NotificationManager.IMPORTANCE_LOW))}
     override fun onStartCommand(i:Intent?,flags:Int,id:Int):Int {
         when(i?.action){
             "START"->{ foreground();enqueue{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }

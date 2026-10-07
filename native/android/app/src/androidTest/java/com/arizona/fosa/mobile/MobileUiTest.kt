@@ -43,6 +43,12 @@ class MobileUiTest {
         ui.onNodeWithTag("talk-button").performTouchInput{moveBy(androidx.compose.ui.geometry.Offset(0f,-65f))}
         Thread.sleep(1300);assertTrue("Hold must still transmit after finger motion and state updates",MobileService.state.optBoolean("talk"))
         ui.waitUntil(8000){peer!!.receivedPackets()>packets}
+        // Real discovery can occupy the service worker longer than presence
+        // timeout. A missing device must not disconnect an existing LAN peer.
+        ui.activityRule.scenario.onActivity{MobileService.instance!!.addDevice(PairingQr.device("ffffffffffff",PairingQr.nonce()))}
+        Thread.sleep(14000)
+        assertTrue("Talk must remain active during device discovery",MobileService.state.optBoolean("talk"))
+        assertTrue("Existing Opus packets must continue during discovery",peer!!.receivedPackets()>packets+100)
         ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
         val peerId=peer!!.id;peer!!.reconnect()
         ui.waitUntil(15000){MobileService.state.optJSONArray("members")?.let{a->a.length()==2&&(0 until a.length()).any{a.getJSONObject(it).optString("id")==peerId&&a.getJSONObject(it).optInt("generation",1)==2}}==true}
