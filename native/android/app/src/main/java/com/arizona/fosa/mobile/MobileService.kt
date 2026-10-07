@@ -204,8 +204,10 @@ class MobileService:Service() {
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
     }catch(e:Exception){rtc?.push(false);if(connectionPhase!=ConnectionPhase.RECONNECTING)reconnectCount++;connectionPhase=ConnectionPhase.RECONNECTING;phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish();recoverConnection()}}
-    private fun recoverConnection(){if(room!=null||joiningCode.isBlank()||SystemClock.elapsedRealtime()-lastReconnectAttempt<7000||lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<6000)return
+    private fun recoverConnection(){if(SystemClock.elapsedRealtime()-lastReconnectAttempt<7000||lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<6000)return
         lastReconnectAttempt=SystemClock.elapsedRealtime()
+        if(room!=null){if(connection.transport==TransportKind.WIFI_DIRECT)try{networkIp=connection.hostNetwork();getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);rtc?.reset();startLocalServers();advertise()}catch(e:Exception){error=e.message.orEmpty()};return}
+        if(joiningCode.isBlank())return
         try{val found=connection.resolve(joiningCode,address,profile.optString("session"));connection.bind(found.address)
             val body=JSONObject().put("code",joiningCode).put("name",profile.optString("name")).put("role",profile.optString("role")).put("client","Native Android").put("resumeToken",profile.optString("token")).put("clientKey",prefs.getString("client-key:$joiningCode",""))
             val resumed=connection.join(found,body);require(resumed.getString("id")==profile.getString("id")){"Identité de reprise différente"};profile=resumed;address=found.address;ack=0;rtc?.reset();prefs.edit().putString("profile",profile.toString()).putString("address",address).apply()
