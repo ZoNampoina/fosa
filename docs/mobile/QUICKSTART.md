@@ -1,4 +1,4 @@
-# FOSA Mobile — audited LAN-first flow
+# FOSA Mobile 0.12.6 — LAN-first audited flow
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
