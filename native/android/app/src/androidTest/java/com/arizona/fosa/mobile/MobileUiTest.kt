@@ -22,6 +22,8 @@ class MobileUiTest {
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
+        val nearby=if(android.os.Build.VERSION.SDK_INT>=33)"android.permission.NEARBY_WIFI_DEVICES" else "android.permission.ACCESS_FINE_LOCATION"
+        inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} $nearby").close()
         ui.waitUntil(5000){ui.onAllNodesWithTag("home-create").fetchSemanticsNodes().isNotEmpty()}
         shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Enter the code.\nThat\'s all.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
@@ -29,7 +31,7 @@ class MobileUiTest {
         assertFalse("Native host must stay LAN-only until Web pairing is explicitly requested",MobileService.state.optBoolean("webPairing"))
         peer=NativePeerFixture(ctx,MobileService.state)
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.let{a->(0 until a.length()).any{a.getJSONObject(it).optBoolean("connected")}}==true}
-        shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithText("MUTE").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithTag("nav-STATUS").performClick();ui.onNodeWithTag("nav-MEMBERS").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithText("UNMUTE").performClick();ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
+        shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithText("MUTE").performScrollTo().performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithTag("nav-STATUS").performClick();ui.onNodeWithTag("nav-MEMBERS").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithText("UNMUTE").performScrollTo().performClick();ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
         ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithText("FOSA MOBILE · ${com.arizona.fosa.BuildConfig.VERSION_NAME} · NATIVE").assertExists();shot("07-settings");ui.activityRule.scenario.onActivity{MobileService.instance!!.volume(.25)};ui.waitUntil(5000){MobileService.state.optDouble("master")==.25};ui.onNodeWithTag("nav-TALK").performClick();ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithText("-12.0 dB").assertExists();ui.onNodeWithText("OFFLINE PACKAGE").performScrollTo().performClick();shot("08-offline");ui.onNodeWithText("CHECK OFFLINE READY").performClick();ui.onNodeWithText("APP SHELL · AUDIO · UI · ICONS READY").assertExists()
         ui.onNodeWithText("CLOSE").performScrollTo().performClick();ui.onNodeWithTag("nav-TALK").performClick()
         val packets=peer!!.receivedPackets()
@@ -41,6 +43,12 @@ class MobileUiTest {
         ui.onNodeWithTag("talk-button").performTouchInput{moveBy(androidx.compose.ui.geometry.Offset(0f,-65f))}
         Thread.sleep(1300);assertTrue("Hold must still transmit after finger motion and state updates",MobileService.state.optBoolean("talk"))
         ui.waitUntil(8000){peer!!.receivedPackets()>packets}
+        // Real discovery can occupy the service worker longer than presence
+        // timeout. A missing device must not disconnect an existing LAN peer.
+        ui.activityRule.scenario.onActivity{MobileService.instance!!.addDevice(PairingQr.device("ffffffffffff",PairingQr.nonce()))}
+        Thread.sleep(14000)
+        assertTrue("Talk must remain active during device discovery",MobileService.state.optBoolean("talk"))
+        assertTrue("Existing Opus packets must continue during discovery",peer!!.receivedPackets()>packets+100)
         ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
         val peerId=peer!!.id;peer!!.reconnect()
         ui.waitUntil(15000){MobileService.state.optJSONArray("members")?.let{a->a.length()==2&&(0 until a.length()).any{a.getJSONObject(it).optString("id")==peerId&&a.getJSONObject(it).optInt("generation",1)==2}}==true}

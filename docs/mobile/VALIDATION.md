@@ -1,15 +1,15 @@
-# Validation scope
+# Validation FOSA 0.13.0
 
-The tests exercise actual software transports and rendering. They do not certify physical audio latency or a particular phone, MR18, headset, hotspot firmware or access point.
+Les résultats exacts et scénarios physiques A–J sont dans [LOCAL-FIRST-REPORT.md](LOCAL-FIRST-REPORT.md). Classifications obligatoires : TESTÉ AUTOMATIQUEMENT, TESTÉ SUR ÉMULATEUR, NÉCESSITE TEST SUR APPAREIL PHYSIQUE.
 
-- Android instrumentation: two native WebRTC engines establish direct LAN ICE/Opus; actual sender tracks enforce User/Group/Leader/All PTT, release and Panic Mute; selective User/Group/Leader/All listening plus per-member receive mute control the corresponding remote AudioTracks; metrics are obtained from RTCStats; peer reset establishes a new connection.
-- Native coordinator: incorrect code/token rejection, leader-only groups, UTF-8 HTTP bodies, public roster privacy and stale Talk expiry.
-- Android UI: actual host foreground service, Create/Join/Talk/Members/Status/Settings/Offline, hold release, continued native SRTP reception and actual AudioTrack activity while the activity is stopped. A native host is asserted LAN-only until Web pairing is explicitly opened, and Settings must show the real BuildConfig version. Landscape Talk and Panic Mute must be fully visible above navigation. No fabricated VU or physical latency.
-- Browser: guests create their invitations through the actual Join Session form and generate real QR/SDP offers. Blank or invalid codes explain Members → Invite without opening the microphone; a real rendezvous network failure automatically falls back to the 100% local QR flow; a failed QR render releases microphone/connection resources, preserves fields, and permits a successful retry. The resulting three actual Chromium WebRTC peers use a test coordinator implementing the same message schema, with a real injected reference oscillator decoded on receiving streams. User and Group targets leave non-selected receivers silent; All reaches both. A deterministic client oscillator is decoded at the host to verify the reverse audio direction, and selective User/Leader listening is verified at rendered output. The code-pairing fixture now withholds host ICE in the first answer and delivers it later, verifying the same late-candidate repair used by real Android/Web pairing. RECONNECT AUDIO must create a new ICE ufrag (real ICE restart). HTTP is blocked after connection to verify audio and coordinator RPC remain peer-to-peer. Panic, responsive layouts and offline reload are checked.
-- WebKit: the same blank-code guidance and cached app shell/UI after the local HTTP server is stopped. The Web Inspector offline/routing switches intercept navigation before its worker, so the test removes the actual server instead. This is not an iPhone hardware audio test.
-- SwiftUI preparation: library compiles; no iOS audio engine/IPA.
-- Existing Bodypack checks retained: Python Windows/Linux capture/mix/device/limiter/control tests; PCM/Opus browser decoding and talkback; native UDP AudioTrack/background/panic test.
+Commandes :
 
-The browser test coordinator is a fixture, not a production Web host. Cross-stack Android-to-iPhone interoperability still requires physical devices. The protocol and wire negotiation are implemented, but that hardware test is not reported as successful.
+- `python -m unittest discover -s audio-bridge/tests -v`
+- `node mobile/tests/browser.cjs` — compatibilité 0.12, vrai Opus décodé, écoute/routage, PTT tactile et cache Chromium/WebKit.
+- `node mobile/tests/local-first.cjs` — protocole de coordinateur en fixture Node, vrais HTTP et Chromium WebRTC, authentification par code, reprise, paire host/host, DTLS, voix décodée dans les deux sens, aucun domaine externe.
+- `gradle assembleDebug assembleDebugAndroidTest`
+- `gradle connectedDebugAndroidTest` — vrai coordinateur Kotlin, vrai TLS/CA validé et assets embarqués, QR décodé, reprise/permissions ; moteur audio natif et UI/service Bodypack/Mobile existants.
 
-Before Live: dedicated AP or hotspot with client isolation disabled, two Android phones with wired earphones; User/Group/Leader/All speech, selective listening mute, router WAN removed, screen locked, Wi-Fi reconnect, Panic Mute. Then pair a cached iPhone PWA. Measure mouth-to-ear latency physically. Keep physical phone/headset volume low for initial calibration.
+Les workflows existants restent les portes de publication. Aucun média de test n’est une preuve d’une liaison entre deux radios physiques. Un espace réseau de développement limité à loopback ne possède pas de candidats LAN admissibles : le test média doit échouer, sans assouplir les filtres de production.
+
+Mesures physiques requises : WAN débranché avant pairing, P2P sans routeur, hotspot + PC Web avec certificat approuvé, deux sens de scan à une opération, DNS/cloud bloqués, panne/reprise sans doublons, deux sens de voix réellement entendus, chemin ICE host/host et latence impulsion microphone → casque.

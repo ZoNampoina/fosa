@@ -1,31 +1,45 @@
-# FOSA Mobile 0.12.7 — LAN-first audited flow
+# FOSA Mobile 0.13.0 — démarrage local
 
-**Android**
-1. Install the APK. Open FOSA → Create Session. Enable microphone.
-2. Use the same Wi-Fi on every phone, or enable Android hotspot and join it.
-3. Create BAND LIVE. On another Android device: Join Session → enter the private six-digit code. FOSA first probes the hotspot/Wi-Fi gateway on the fixed local FOSA port, then uses mDNS discovery. No Internet, device selection or QR is required.
-4. Select User, Group, Leader or All; hold Talk. Release to listen. Use wired headphones to avoid feedback.
-5. Panic Mute cuts local listening and transmission. Receive continues in the foreground service while the screen is off. Notification Talk is limited to five seconds; touch Talk again to stop.
+## Android sur le même Wi-Fi/Ethernet/hotspot
 
-**iPhone / iPad / Web fallback**
-1. Open https://zonampoina.github.io/fosa/mobile/ once with Internet and cache the app.
-2. On the Android host, open MEMBERS → CODE / QR. This temporarily opens Web code pairing; ordinary native sessions stay LAN-only and do not poll the cloud.
-3. Web client: Join Session → name/role/code → JOIN WITH CODE. Internet is used only for this short offer/answer + ICE bootstrap; audio and control then stay direct on the LAN.
-4. For zero-Internet Web pairing, FOSA now switches automatically to 100% LOCAL · OFFLINE QR when the rendezvous cannot be reached. You can also choose it manually. Browsers cannot discover the Android host from six digits alone, so QR remains the fully local Web fallback.
-5. RECONNECT AUDIO performs a true ICE restart while the direct control channel survives. After a complete WebRTC/network-address loss, re-pair by code or local QR.
+1. Installer l’APK de la 0.13.0 sur l’hôte et les invités. Autoriser le micro pour parler.
+2. Hôte : CREATE SESSION → nom du groupe → CREATE SESSION.
+3. Invité : JOIN SESSION → six chiffres → JOIN WITH CODE. NEARBY permet aussi de sélectionner l’hôte ; SCAN QR lit son QR court.
+4. Attendre CONNECTED et SRTP CONNECTED, puis tester TALK dans les deux sens avec des écouteurs filaires.
+5. Members : User/Group, autorisations parole/écoute et ajout d’appareils. Internet peut être coupé dès avant la première étape.
 
-**MR18 / PC**
-PC : MR18 USB → lancer FOSA SERVER → START LOW LATENCY → lire l’adresse Bodypack affichée.
-Téléphone : même LAN → OPEN BODYPACK (accueil ou Settings) → serveur détecté, IP manuelle ou lien QR du PC → CONNECT.
-Premier test : écouteurs filaires → monter CH1 → Monitor Gain → maintenir Talk → relâcher → Panic Mute.
+Au démarrage, la permission Nearby prépare aussi le repli automatique Wi-Fi Direct ; son refus laisse le LAN disponible. Les APK sont signés avec une clé debug désormais conservée par la CI. Une ancienne installation 0.12.x peut avoir une autre signature : si Android refuse la mise à jour, une réinstallation effacera son identité. Préparer cette migration avant la répétition, jamais pendant une session.
 
-Le Bodypack conserve le mix serveur, le gain, le limiteur et le PCM natif. Un timeout temporaire du contrôle ne ferme plus le flux UDP authentifié ; Talk se coupe jusqu’au rétablissement des autorisations. Une erreur de chargement reste visible avec l’adresse modifiable. FOSA Mobile intercom peut fonctionner sans MR18 ni PC.
+## Sans routeur
 
-**Audit LAN-first**
-Les tests automatisés couvrent désormais les candidats ICE tardifs Android→Web, le vrai ICE restart, User/Group/Leader/All, mute d’écoute individuel, reprise d’identité sans doublon et réception native en arrière-plan. La version affichée dans Settings est lue depuis le BuildConfig réel au lieu d’être codée en dur.
+Wi-Fi doit être activé. Sans LAN, FOSA tente Wi-Fi Direct natif. Accorder Nearby devices sur Android 13+ ou localisation sur Android 12 et antérieurs. Android peut afficher son propre consentement de connexion. FOSA pilote les APIs P2P ; aucun réglage Wi-Fi Direct manuel n’est demandé par l’app.
 
-**First physical test**
-Android host + Android client → Talk User → Talk All → wired headphones → unplug router WAN → verify speech continues → screen off/on → stop/rejoin Wi-Fi → Panic Mute. Try the same with PWA only after native path succeeds. A guest network or AP isolation may prevent direct connections. Router/hotspot hardware is not available in the development environment; these tests remain to be run physically.
+Si P2P échoue : sur l’hôte, CREATE LOCAL FOSA NETWORK. Lire le SSID et le mot de passe ; connecter les invités à ce Wi-Fi depuis leur système. Créer/rejoindre ensuite la session par code. Le hotspot conserve sa réservation dans le service ; fermer FOSA/LEAVE ferme le réseau qu’il a créé. Un hotspot système préexistant peut aussi être utilisé.
 
-**Not finished**
-Native iOS audio/IPA, Web hosting/discovery, Web guaranteed background audio, host migration, priority Talk, custom native DSP, physical end-to-end latency measurement. No advertised 20 ms result. Eight-member load needs hardware validation. Android download is currently a test-signed APK, not Play Store distribution; uninstall an older incompatible-signature version before updating.
+## Un seul scan depuis l’hôte
+
+Invité : JOIN → DISPLAY PAIRING QR, laisser l’écran ouvert. Hôte : Members → ADD DEVICE. Scanner une fois. Invitation valable 90 secondes. Le client rejoint automatiquement ; aucun QR de réponse. L’Android invité doit rester visible pour que le service audio puisse démarrer selon les règles Android.
+
+## Web PC/iPhone/tablette depuis l’Android
+
+1. Rejoindre le Wi-Fi/hotspot/groupe exposé par l’hôte. Le Web ne crée pas de groupe P2P.
+2. Hôte : Members → WEB ACCESS, copier l’URL HTTPS locale ou scanner son QR URL.
+3. Avant le premier accès audio, ouvrir la page HTTP `/trust`, télécharger le certificat public, vérifier l’empreinte affichée sur l’hôte et lui accorder confiance. Windows : racines de confiance de l’utilisateur ; Android : certificat CA ; iOS : profil puis confiance explicite. Firefox peut utiliser un magasin séparé.
+4. Ouvrir le HTTPS local, saisir les six chiffres et autoriser le micro. ENABLE AUDIO permet de débloquer une lecture que le navigateur a suspendue.
+5. OFFLINE PACKAGE vérifie le cache PWA. Les assets sont fournis par l’Android même si GitHub/DNS/Internet sont inaccessibles. Un cache d’interface n’est pas un serveur : l’hôte doit rester disponible pour une nouvelle session.
+
+Le HTTP d’une IP privée charge l’interface mais ne fournit pas getUserMedia/service worker dans les navigateurs standards. Ne pas attendre de talkback complet depuis ce lien non sécurisé. Un simple avertissement TLS ignoré peut ne pas suffire : installer la confiance, ou utiliser l’APK Android. Garder la page Web ouverte ; arrière-plan Web non garanti.
+
+GitHub Pages reste facultatif. Pour conserver son entrée par six chiffres lorsqu'Internet existe, l'hôte peut activer ENABLE INTERNET DISCOVERY · 2 MIN dans Advanced Diagnostics. Le rendez-vous échange seulement la signalisation initiale ; audio et commandes deviennent directs. Sans Internet, utiliser WEB ACCESS sur l'hôte. Le Web local n'appelle jamais ce rendez-vous.
+
+## Reconnexion et diagnostic
+
+Ne pas effacer les données de l’app/site. Une reprise conserve clientKey et resumeToken, donc le même membre. RECONNECT AUDIO relance la négociation. Après changement d’IP d’un hôte, rouvrir son nouveau WEB ACCESS dans le navigateur ; une coupure temporaire sur la même adresse récupère la session.
+
+Status affiche transport, signalisation LOCAL et liens SRTP. Advanced contient IP, candidats/paire sélectionnée, DTLS, codec, paquets, RTT, jitter, perte et reprises. Aucun chiffre de latence micro → casque n’est garanti.
+
+[Checklist physique A–J et résultats de livraison](LOCAL-FIRST-REPORT.md). Les essais physiques ne sont pas remplacés par le build ou l’émulateur.
+
+## Bodypack MR18 / PC
+
+MR18 USB → PC → FOSA SERVER → START LOW LATENCY. Android : OPEN BODYPACK, serveur détecté ou adresse locale/code, écouteurs, gain/master. Ce moteur PCM et le bridge ne sont pas refondus par l’appairage Mobile.

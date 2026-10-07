@@ -1,16 +1,15 @@
-# FOSA Mobile 0.12.6 — Intercom LAN-first audité
+# FOSA Mobile 0.13.0 — LOCAL-FIRST PAIRING
 
-0.12.6 consolide FOSA Mobile autour de l’objectif principal : communication voix temps réel directe sur Wi‑Fi/hotspot local, sans relais audio Internet, avec sélection de la destination de parole et de la source d’écoute. La validation couvre maintenant l’audio Opus décodé dans les deux sens, l’appairage, ICE, reconnexion, arrière-plan natif et les filtres User / Group / Leader / All.
+Créer une session puis saisir six chiffres : l’Android cherche d’abord l’hôte sur le LAN, puis via Wi-Fi Direct natif. Sans réseau commun, l’hôte peut créer un groupe P2P ou un hotspot local. Internet n’est pas nécessaire pour la découverte, l’authentification, la signalisation ou l’audio du nouveau parcours.
 
-FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android natif reste entièrement LAN/offline et tente d’abord le port local 48765 de la passerelle hotspot, puis mDNS. Le Web par code utilise un rendez-vous HTTPS uniquement pendant une fenêtre d’appairage explicitement ouverte par l’hôte ; ensuite audio Opus/SRTP et commandes restent directs sur le LAN. Pour un Web totalement hors Internet, utiliser le QR local.
+- **Android** : [FOSA-Android.apk](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
+- **Web** : ouvrir **WEB ACCESS** sur l’hôte Android, puis son URL locale ; HTML/JS/CSS/QR/PWA sont embarqués dans l’APK. Micro/PWA exigent le HTTPS local et la confiance au certificat de cet hôte une fois.
+- **GitHub Pages** : [FOSA Mobile](https://zonampoina.github.io/fosa/mobile/) reste disponible, sans être nécessaire au Web fourni localement.
+- **Guides** : [démarrage](docs/mobile/QUICKSTART.md), [protocole](docs/mobile/PROTOCOL.md), [tests](docs/mobile/VALIDATION.md), [rapport et limites](docs/mobile/LOCAL-FIRST-REPORT.md).
 
-- **Android Native :** [APK FOSA](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
-- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage Web par code avec bootstrap Internet court ou QR 100 % local, page ouverte pendant l’audio.
-- **Démarrage et limites :** [guide court](docs/mobile/QUICKSTART.md).
-- **Architecture commune :** [FOSA LAN Protocol 1](docs/mobile/PROTOCOL.md).
-- **iOS natif :** [préparation SwiftUI](native/ios/README.md), sans IPA ni moteur audio iOS livré.
+Join propose NEARBY, ENTER CODE et SCAN QR. Members permet ADD DEVICE, SHOW QR et WEB ACCESS. Les QR normaux sont des locators courts : aucun SDP/ICE, aucun scan retour. Les identités et générations évitent les doublons lors d’une reprise. Audio Opus et commandes restent directs sur le réseau local ; aucun média Supabase/STUN/TURN.
 
-La latence physique et le fonctionnement sur routeur/hotspot réels restent à vérifier avec les appareils. Les statistiques RTC sont distinctes de la latence audio. Les contrôles natifs de gate/EQ et la migration de l’hôte ne sont pas disponibles. Le Bodypack MR18 reste accessible depuis l’accueil Android et conserve son moteur PCM et son mix serveur.
+Wi-Fi Direct doit encore être validé avec deux téléphones physiques, selon leurs capacités radio et permissions. Les stats RTC ne sont pas la latence microphone → casque. iOS/Windows natifs ne sont pas livrés ; leur Web exige déjà l’appartenance au réseau et le HTTPS de confiance. Les résultats réels des tests et les scénarios WAN/DNS coupés figurent dans le rapport. Bodypack MR18, bridge et Low Latency sont conservés.
 
 ---
 

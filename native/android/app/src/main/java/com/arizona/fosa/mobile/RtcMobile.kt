@@ -36,10 +36,13 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     // our lock and waits for that same thread. Never acquire it in an observer.
     private fun defer(action:()->Unit){callbacks.post{if(!closed)action()}}
     private var sampleTime=0L
+    private val context=ctx
     private val adm:JavaAudioDeviceModule
     private val factory:PeerConnectionFactory
     private var source:AudioSource?
     init {
+        val nearby=if(android.os.Build.VERSION.SDK_INT>=33)android.Manifest.permission.NEARBY_WIFI_DEVICES else android.Manifest.permission.ACCESS_FINE_LOCATION
+        NetworkMonitorAutoDetect.setIncludeWifiDirect(ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_WIFI_DIRECT)&&ctx.checkSelfPermission(nearby)==android.content.pm.PackageManager.PERMISSION_GRANTED)
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
         adm=JavaAudioDeviceModule.builder(ctx).setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setSampleRate(48000)
             .setAudioRecordErrorCallback(object:JavaAudioDeviceModule.AudioRecordErrorCallback {
@@ -63,7 +66,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
                 if(error.startsWith("Microphone")||error.startsWith("Capture"))error=""
                 val now=System.nanoTime();if(now-sampleTime>150000000L){sampleTime=now;val data=a.data;val b=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);var sum=0.0;var count=0;while(b.remaining()>=2){val v=b.short/32768.0;sum+=v*v;count++};level=if(count>0)max(-120.0,20*log10(max(1e-6,sqrt(sum/count)))) else null}
             }.createAudioDeviceModule()
-        factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
+        val localOnly=PeerConnectionFactory.Options().apply{networkIgnoreMask=PeerConnectionFactory.Options.ADAPTER_TYPE_CELLULAR or PeerConnectionFactory.Options.ADAPTER_TYPE_VPN}
+        factory=PeerConnectionFactory.builder().setOptions(localOnly).setAudioDeviceModule(adm).createPeerConnectionFactory()
         source=if(mic)createMicrophone() else null
     }
     private fun createMicrophone()=factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))})
@@ -74,7 +78,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     }
     fun microphoneReady():Boolean=source!=null
     @Synchronized private fun refreshTalk(){
-        talking=talkRequested&&!muted&&source!=null&&links.any{it.value.connected&&eligible(it.key)}
+        talking=talkRequested&&!muted&&source!=null&&roster.find{it.optString("id")==self}?.optBoolean("canTalk",true)!=false&&links.any{it.value.connected&&eligible(it.key)}
         links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))}
         changed()
     }
@@ -84,7 +88,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Synchronized fun volume(value:Double){master=if(value.isFinite())value.coerceIn(0.0,1.0) else 0.0;links.values.forEach{it.received?.setVolume(master)}}
     fun mutedMembers():List<String> = memberMutes.filter{it.value}.keys.toList()
     private fun listenEligible(id:String):Boolean {val m=roster.find{it.optString("id")==id};return listenTarget=="all"||listenTarget=="user:$id"||listenTarget=="leader"&&m?.optBoolean("leader")==true||listenTarget.startsWith("group:")&&m?.optString("group")==listenTarget.removePrefix("group:")}
-    @Synchronized private fun applyListen(){links.forEach{(id,l)->l.received?.setEnabled(memberMutes[id]!=true&&listenEligible(id))};changed()}
+    @Synchronized private fun applyListen(){links.forEach{(id,l)->l.received?.setEnabled(memberMutes[id]!=true&&listenEligible(id)&&roster.find{it.optString("id")==self}?.optBoolean("canListen",true)!=false&&roster.find{it.optString("id")==id}?.optBoolean("canTalk",true)!=false)};changed()}
     @Synchronized fun listen(value:String){listenTarget=value;applyListen()}
     @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;applyListen()}
     @Synchronized fun sync(members:List<JSONObject>) {
@@ -111,7 +115,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->link.iceState=s.name;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;defer{if(links[id]===link)refreshTalk()}} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
-            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)){observed?.localIce?.add(c);observed?.localCandidates=observed?.localIce?.size ?: 0;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
+            override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)&&LanAddress.localCandidate(context,c.sdp)){observed?.localIce?.add(c);observed?.localCandidates=observed?.localIce?.size ?: 0;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
             override fun onIceCandidatesRemoved(c:Array<out IceCandidate>){}
             override fun onAddStream(s:MediaStream){}
             override fun onRemoveStream(s:MediaStream){}
@@ -136,7 +140,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         override fun onCreateFailure(s:String){changed()}
         override fun onSetFailure(s:String){changed()}
     }
-    private fun publish(id:String,type:String,s:SessionDescription){val l=links[id]?:return;l.pc.setLocalDescription(observer(done={if(links[id]===l)signal(id,type,JSONObject().put("sdp",LanAddress.sdp(s.description)).put("type",type))}),s)}
+    private fun publish(id:String,type:String,s:SessionDescription){val l=links[id]?:return;l.pc.setLocalDescription(observer(done={if(links[id]===l)signal(id,type,JSONObject().put("sdp",LanAddress.localSdp(context,s.description)).put("type",type))}),s)}
     @Synchronized fun offer(id:String){val l=make(id);if(l.channel==null)wire(id,l.pc.createDataChannel("fosa-mobile",DataChannel.Init()));l.pc.createOffer(observer(created={if(links[id]===l)publish(id,"offer",it)}),MediaConstraints())}
     @Synchronized fun receive(id:String,type:String,data:JSONObject) {
         if(type=="reset"){remove(id);make(id);if(self<id)offer(id);return}
@@ -147,8 +151,17 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         val s=SessionDescription(if(type=="offer")SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,LanAddress.sdp(data.getString("sdp")))
         l.pc.setRemoteDescription(observer(done={synchronized(this){if(links[id]===l){l.remote=true;l.pending.forEach{l.pc.addIceCandidate(it)};l.pending.clear();if(type=="offer")l.pc.createAnswer(observer(created={if(links[id]===l)publish(id,"answer",it)}),MediaConstraints())}}}),s)
     }
-    @Synchronized fun stats(){links.values.forEach{l->l.pc.getStats { report->val out=JSONObject();report.statsMap.values.forEach{s->val m=s.members
+    @Synchronized fun stats(){links.forEach{(id,l)->l.pc.getStats { report->val out=JSONObject();report.statsMap.values.forEach{s->val m=s.members
+        if(s.type=="transport"){m["dtlsState"]?.let{out.put("dtls",it)};m["selectedCandidatePairId"]?.let{pairId->report.statsMap[pairId.toString()]?.let{pair->
+            out.put("selectedCandidatePair",pair.id)
+            val local=report.statsMap[pair.members["localCandidateId"]?.toString()]?.members
+            val remote=report.statsMap[pair.members["remoteCandidateId"]?.toString()]?.members
+            for((prefix,candidate) in listOf("local" to local,"peer" to remote))candidate?.let{c->for(k in listOf("address","port","protocol","candidateType"))c[k]?.let{out.put(prefix+k.replaceFirstChar{it.uppercase()},it)}}
+            if(local?.get("candidateType") in listOf("relay","srflx")||remote?.get("candidateType") in listOf("relay","srflx"))defer{error="Chemin audio externe refusé";push(false);remove(id);changed()}
+        }}}
         if(s.type=="candidate-pair"&&m["state"]=="succeeded"&&m["currentRoundTripTime"] is Number)out.put("rttMs",(m["currentRoundTripTime"] as Number).toDouble()*1000)
+        if(s.type=="codec")m["mimeType"]?.let{out.put("codec",it)}
+        if(s.type=="outbound-rtp"&&m["kind"]=="audio"){(m["packetsSent"] as? Number)?.let{out.put("packetsSent",it.toLong())}}
         if(s.type=="inbound-rtp"&&m["kind"]=="audio"){(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
     };l.stats=out;changed() }}}
     @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}

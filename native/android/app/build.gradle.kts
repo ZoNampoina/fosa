@@ -6,7 +6,14 @@ android {
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     namespace = "com.arizona.fosa"
     compileSdk = 35
-    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 19; versionName = "0.12.7"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "0.13.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    System.getenv("FOSA_DEBUG_KEYSTORE")?.let { path ->
+        signingConfigs.getByName("debug").apply {
+            storeFile = file(path); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"
+        }
+    }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/fosa-web-assets"))
+    packaging { resources.excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF" }
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
@@ -25,4 +32,11 @@ dependencies {
     androidTestImplementation("androidx.test:core:1.6.1")
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 }
+val bundleFosaWeb by tasks.registering(Copy::class) {
+    from("../../../mobile") { include("*.html","*.js","*.css","*.json","*.svg") }
+    into(layout.buildDirectory.dir("generated/fosa-web-assets/fosa-web"))
+}
+tasks.named("preBuild").configure { dependsOn(bundleFosaWeb) }
