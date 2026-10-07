@@ -18,6 +18,12 @@ try {
  await b.fill('[name="code"]','12ab');await b.click('#join-form button');assert(await b.isVisible('#join-error'));assert(await b.isEnabled('#join-form button'));
  await b.fill('[name="code"]','123456');await b.fill('[name="name"]','   ');await b.click('#join-form button');assert((await b.textContent('#join-error')).includes('nom'));assert(await b.evaluate(()=>!fosaMobile.raw));
  assert(await b.evaluate(async()=>{try{await fosaMobile.prepare({name:'ZO',code:''});return false;}catch(e){return e.message.includes('6 chiffres')&&!fosaMobile.raw&&!fosaMobile.links.size;}}));
+ // A real rendezvous network failure must automatically fall back to the 100% local QR flow.
+ const offlineCtx=await browser.newContext({viewport:{width:390,height:844}});const offlinePage=await offlineCtx.newPage();
+ await offlinePage.route('**/functions/v1/pair-rendezvous',route=>route.abort('internetdisconnected'));
+ await offlinePage.goto(base);await offlinePage.click('#join');await offlinePage.fill('[name="code"]','123456');await offlinePage.fill('[name="name"]','OFFLINE');await offlinePage.fill('[name="role"]','KEYS');await offlinePage.click('#join-form button');
+ await offlinePage.waitForSelector('#invite-qr',{timeout:15000});assert((await offlinePage.textContent('#sheet-content')).includes('100 % local'));assert((await offlinePage.textContent('#sheet-content')).includes('Rendez-vous Internet indisponible'));
+ assert(await offlinePage.evaluate(()=>!!fosaMobile.offer&&!!fosaMobile.microphone));await offlineCtx.close();
  await b.fill('[name="name"]','JOHN');await b.fill('[name="role"]','DRUMS');
  // Fail actual QR rendering once, after offer/capture: release resources and retain inputs.
  await b.evaluate(()=>{const draw=FosaQR.draw;FosaQR.draw=async()=>{FosaQR.draw=draw;window.failedAttemptTracks=[...fosaMobile.raw.getTracks(),fosaMobile.microphone];throw Error('QR rendering test failure');};});
