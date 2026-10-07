@@ -51,10 +51,10 @@ try {
  await b.waitForFunction(()=>fosaMobile.links.size===2&&[...fosaMobile.links.values()].every(l=>l.pc.connectionState==='connected'),{timeout:25000});
  assert(await b.evaluate(()=>[...fosaMobile.links.values()].every(l=>l.localCandidates>0)),'Web must expose usable local ICE candidates');
  await c.waitForFunction(()=>fosaMobile.links.size===2&&[...fosaMobile.links.values()].every(l=>l.pc.connectionState==='connected'),{timeout:25000});
- const beforeRepairUfrag=await b.evaluate(()=>/a=ice-ufrag:([^\\r\\n]+)/.exec(fosaMobile.links.get(fosaMobile.host).pc.localDescription.sdp)?.[1]||'');
+ const beforeRepairUfrag=await b.evaluate(()=>/a=ice-ufrag:([^\r\n]+)/.exec(fosaMobile.links.get(fosaMobile.host).pc.localDescription.sdp)?.[1]||'');
  await b.evaluate(()=>fosaMobile.repairAudio());
  await b.waitForFunction(()=>[...fosaMobile.links.values()].every(l=>l.pc.connectionState==='connected'&&l.pc.signalingState==='stable'),{timeout:15000});
- const afterRepairUfrag=await b.evaluate(()=>/a=ice-ufrag:([^\\r\\n]+)/.exec(fosaMobile.links.get(fosaMobile.host).pc.localDescription.sdp)?.[1]||'');
+ const afterRepairUfrag=await b.evaluate(()=>/a=ice-ufrag:([^\r\n]+)/.exec(fosaMobile.links.get(fosaMobile.host).pc.localDescription.sdp)?.[1]||'');
  assert(beforeRepairUfrag&&afterRepairUfrag&&beforeRepairUfrag!==afterRepairUfrag,'RECONNECT AUDIO must perform a real ICE restart');
  for(const p of [b,c])await p.evaluate(async()=>{const f=window.fosaMobile;await f.context.resume();const l=[...f.links.values()].find(l=>l.audio);window.probe=new AudioContext();await probe.resume();const src=probe.createMediaStreamSource(l.audio.srcObject);window.meter=probe.createAnalyser();meter.fftSize=2048;src.connect(meter);window.rms=()=>{const a=new Float32Array(2048);meter.getFloatTimeDomainData(a);return Math.sqrt(a.reduce((s,x)=>s+x*x,0)/a.length);};});
  await host.evaluate(()=>{fosaMobile.destination('user:10000000-0000-0000-0000-000000000000');fosaMobile.push(true);});
