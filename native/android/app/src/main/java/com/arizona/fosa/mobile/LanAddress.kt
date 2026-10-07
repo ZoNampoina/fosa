@@ -32,7 +32,7 @@ object LanAddress {
             .flatMap{it.interfaceAddresses}.filter{a->val own=a.address.address;val bits=a.networkPrefixLength.toInt()
                 own.size==4&&target.size==4&&privateV4(a.address.hostAddress.orEmpty())&&bits in 1..32&&
                     (0 until bits).all{i->((own[i/8].toInt() xor target[i/8].toInt()) and (1 shl (7-i%8)))==0}}
-            .maxByOrNull{it.networkPrefixLength}?.address?.hostAddress
+            .maxWithOrNull(compareBy<java.net.InterfaceAddress>({it.address.hostAddress==peer},{it.networkPrefixLength}))?.address?.hostAddress
     }catch(_:Exception){null}
     fun localCandidate(ctx:Context,value:String):Boolean {
         val ip=value.trim().split(Regex("\\s+")).getOrNull(4) ?: return false
