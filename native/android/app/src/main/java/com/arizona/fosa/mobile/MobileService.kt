@@ -151,6 +151,15 @@ class MobileService:Service() {
                 if(cached!=null)postRendezvousAnswer(requestId,cached) else if(rendezvousSeen.add(requestId))enqueue{pairCloud(requestId,r.getString("offer"))}}
         }catch(_:Exception){}finally{cloudBusy.set(false)}}
     }
+    private fun applyWebOffer(id:String,q:JSONObject){
+        val sdp=q.getString("sdp")
+        rtc!!.receive(id,"offer",JSONObject().put("sdp",sdp))
+        val ice=q.optJSONArray("ice") ?: return
+        for(i in 0 until ice.length()){
+            val candidate=ice.getJSONObject(i);val value=candidate.optString("candidate")
+            if(value.isNotBlank()&&!sdp.contains("a=$value"))rtc!!.receive(id,"ice",candidate)
+        }
+    }
     private fun pairingIce(id:String):JSONArray {val out=JSONArray();rtc?.links?.get(id)?.localIce?.forEach{candidate->out.put(JSONObject().put("candidate",candidate.sdp).put("sdpMid",candidate.sdpMid).put("sdpMLineIndex",candidate.sdpMLineIndex))};return out}
     private fun pairingAnswer(id:String,p:JSONObject):String {
         val link=rtc?.links?.get(id) ?: throw IllegalStateException("Lien audio absent")
@@ -184,7 +193,7 @@ class MobileService:Service() {
         val host=room ?: return;val q=unpack(encoded);require(q.getString("type")=="offer"&&q.optString("code")==host.code){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web code"),remote="web-code");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.preparePair(id,p.optInt("generation",1))
-        rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
+        applyWebOffer(id,q)
         finishCloudPair(requestId,id,p)
     }catch(_:Exception){rendezvousSeen.remove(requestId)}}
     private fun postRendezvousAnswer(requestId:String,answer:String){if(cloudWork.isShutdown)return;cloudWork.execute{try{
@@ -238,8 +247,8 @@ class MobileService:Service() {
         val q=unpack(encoded);require(q.getString("type")=="offer"){"Invitation Web invalide"}
         val p=host.call("join",q.put("client","Web fallback"),remote="web-pair");val id=p.getString("id");host.reservePair(id);manual.add(id)
         rtc!!.preparePair(id,p.optInt("generation",1))
-        rtc!!.receive(id,"offer",JSONObject().put("sdp",q.getString("sdp")))
-        // Manual pairing now carries native host ICE candidates explicitly; no WebRTC trickle deadlock.
+        applyWebOffer(id,q)
+        // Manual pairing carries both browser and native LAN ICE candidates explicitly; no trickle deadlock.
         finishOfflinePair(id,p)
     }catch(e:Exception){error=e.message ?: "Appairage impossible";publish()}}}
     private fun advertise(){val nsd=getSystemService(NsdManager::class.java);registration=object:NsdManager.RegistrationListener{
