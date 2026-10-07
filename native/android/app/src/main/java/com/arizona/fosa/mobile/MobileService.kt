@@ -35,7 +35,7 @@ class MobileService:Service() {
     private var wake:PowerManager.WakeLock?=null;private var wifi:WifiManager.WifiLock?=null;private var multicast:WifiManager.MulticastLock?=null
     private var pairAnswer="";private val manual=mutableSetOf<String>();private var networkIp=""
     private val cloudWork=Executors.newSingleThreadExecutor();private val cloudBusy=java.util.concurrent.atomic.AtomicBoolean(false)
-    private var rendezvousSecret="";private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
+    private var rendezvousSecret="";private var webPairingUntil=0L;private val rendezvousSeen=ConcurrentHashMap.newKeySet<String>();private val rendezvousAnswers=ConcurrentHashMap<String,String>()
     private val preferredLanPort=48765
     private val rendezvousUrl="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous"
     private val rendezvousKey="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3"
@@ -93,7 +93,7 @@ class MobileService:Service() {
             }
             prefs.edit().putString("address",address).putString("profile",profile.toString()).putString("code",requestedCode).apply()
         }
-        rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery() else rendezvousCycle();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
+        rtc=newRtc();main.post{routeAudio()};if(room==null)recoverDiscovery();phase="Session connectée";work.scheduleWithFixedDelay({tick()},0,500,TimeUnit.MILLISECONDS)
     }
     private fun enqueue(task:()->Unit){if(!work.isShutdown)try{work.execute{task()}}catch(_:RejectedExecutionException){}}
     private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
@@ -205,7 +205,7 @@ class MobileService:Service() {
         for(n in 0 until signals.length()){val s=signals.getJSONObject(n);val from=s.getString("from")
             if(!s.has("generation")||list.any{it.optString("id")==from&&it.optInt("generation",1)==s.getInt("generation")})engine.receive(from,s.getString("type"),s.getJSONObject("data"))
             ack=maxOf(ack,s.getLong("seq"))}
-        if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&ticks%3==0)rendezvousCycle()
+        if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&SystemClock.elapsedRealtime()<webPairingUntil&&ticks%3==0)rendezvousCycle()
         // Recreate failed links after a bounded interval. The smaller UUID offers, avoiding glare.
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
@@ -224,6 +224,7 @@ class MobileService:Service() {
         if(members!=null){val list=(0 until members.length()).map{members.getJSONObject(it)};engine.sync(list)}
         error="";phase="Audio · reconnexion directe";publish()
     }
+    fun enableWebPairing(ttl:Long=120000){if(room==null)return;webPairingUntil=SystemClock.elapsedRealtime()+ttl;enqueue{rendezvousCycle()};publish()}
     fun repairAudio(){enqueue{rtc?.let{forceRepair(it)}}}
     fun target(value:String){rtc?.let{it.push(false,value)};publish()}
     fun panic(active:Boolean){if(!active)routeWarning="";rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
@@ -289,7 +290,7 @@ class MobileService:Service() {
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("talkRequested",engine?.talkRequested ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
-            .put("local",LanAddress.ip(this)!=null).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
+            .put("local",LanAddress.ip(this)!=null).put("webPairing",room!=null&&SystemClock.elapsedRealtime()<webPairingUntil).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
         val apply={if(instance===this&&version>appliedPublication){appliedPublication=version;state=s}}
         if(Looper.myLooper()==Looper.getMainLooper())apply()else main.post{apply()}
     }
