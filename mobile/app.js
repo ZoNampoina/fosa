@@ -32,7 +32,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function rendezvous(action,body={},timeout=6000){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),timeout);try{const r=await fetch(RENDEZVOUS,{method:"POST",headers:{"content-type":"application/json",apikey:RENDEZVOUS_KEY},body:JSON.stringify({action,...body}),cache:"no-store",signal:ctrl.signal});const q=await r.json().catch(()=>({error:"Réponse rendez-vous illisible"}));if(!r.ok||q.error)throw Error(q.error||"Rendez-vous indisponible");return q;}finally{clearTimeout(timer);}}
 async function pairByCode(values){
   if(globalThis.FOSA_DISABLE_RENDEZVOUS===true)return showOfflineInvite(values);
-  const started=await rendezvous("guest-offer",{code:values.code,offer:client.offer,name:values.name,role:values.role});
+  let started=null,lastStartError=null;
+  for(let attempt=0;attempt<8&&!started;attempt++){try{started=await rendezvous("guest-offer",{code:values.code,offer:client.offer,name:values.name,role:values.role});}catch(e){lastStartError=e;if((e.message||e)!=="Session unavailable")throw e;if(attempt<7)await sleep(450);}}
+  if(!started)throw lastStartError||Error("Session unavailable");
   const deadline=Date.now()+30000;let accepted=false,lastAnswer="";
   while(Date.now()<deadline){
     const q=await rendezvous("guest-poll",{code:values.code,id:started.id});
