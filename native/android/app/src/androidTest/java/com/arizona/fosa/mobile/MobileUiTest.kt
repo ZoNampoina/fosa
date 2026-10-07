@@ -22,6 +22,8 @@ class MobileUiTest {
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
+        val nearby=if(android.os.Build.VERSION.SDK_INT>=33)"android.permission.NEARBY_WIFI_DEVICES" else "android.permission.ACCESS_FINE_LOCATION"
+        inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} $nearby").close()
         ui.waitUntil(5000){ui.onAllNodesWithTag("home-create").fetchSemanticsNodes().isNotEmpty()}
         shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Enter the code.\nThat\'s all.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
