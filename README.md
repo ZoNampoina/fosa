@@ -1,11 +1,11 @@
-# FOSA Mobile 0.12.2 — Audio mobile et Hold to Talk
+# FOSA Mobile 0.12.6 — Intercom LAN-first audité
 
-0.12.2 corrige deux pannes mobiles liées : une erreur audio transitoire ne bloque plus le Push-to-Talk de l’intercom, et le Bodypack conserve le microphone armé pendant la synchronisation des autorisations Talk. Les sockets Bodypack HTTP/UDP sont attachées au réseau LAN menant au PC pour éviter un mauvais routage via les données mobiles. Mettre à jour l’APK Android ; pour le Bodypack, conserver également le bridge PC à jour.
+0.12.6 consolide FOSA Mobile autour de l’objectif principal : communication voix temps réel directe sur Wi‑Fi/hotspot local, sans relais audio Internet, avec sélection de la destination de parole et de la source d’écoute. La validation couvre maintenant l’audio Opus décodé dans les deux sens, l’appairage, ICE, reconnexion, arrière-plan natif et les filtres User / Group / Leader / All.
 
-FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android reste entièrement LAN/offline ; le Web utilise un rendez-vous HTTPS éphémère uniquement pour échanger l’offre/réponse initiale, puis l’audio Opus/SRTP et les commandes restent directs sur le LAN.
+FOSA Mobile simplifie l’entrée en session : l’utilisateur saisit le code privé à 6 chiffres et FOSA trouve automatiquement l’hôte sur le même Wi-Fi/hotspot. Android natif reste entièrement LAN/offline et tente d’abord le port local 48765 de la passerelle hotspot, puis mDNS. Le Web par code utilise un rendez-vous HTTPS uniquement pendant une fenêtre d’appairage explicitement ouverte par l’hôte ; ensuite audio Opus/SRTP et commandes restent directs sur le LAN. Pour un Web totalement hors Internet, utiliser le QR local.
 
 - **Android Native :** [APK FOSA](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
-- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage par code avec un hôte Android (QR de secours), page ouverte pendant l’audio.
+- **Web fallback / iPhone / iPad / tablette / PC :** [FOSA Mobile Web](https://zonampoina.github.io/fosa/mobile/) — cache hors ligne, appairage Web par code avec bootstrap Internet court ou QR 100 % local, page ouverte pendant l’audio.
 - **Démarrage et limites :** [guide court](docs/mobile/QUICKSTART.md).
 - **Architecture commune :** [FOSA LAN Protocol 1](docs/mobile/PROTOCOL.md).
 - **iOS natif :** [préparation SwiftUI](native/ios/README.md), sans IPA ni moteur audio iOS livré.
