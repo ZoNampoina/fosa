@@ -27,6 +27,10 @@ class MobileEngineTest {
         try{val c=URL("http://127.0.0.1:${http.port}/lan/join").openConnection() as HttpURLConnection;c.requestMethod="POST";c.doOutput=true;c.readTimeout=3000
             c.outputStream.use{it.write(JSONObject().put("code",room.code).put("name","Éléonore").toString().toByteArray())};val response=JSONObject(c.inputStream.bufferedReader().use{it.readText()});assertEquals("Éléonore",response.getString("name"));c.disconnect()
         }finally{http.close()}
+        val fixed=LanHttp("127.0.0.1",room,48765)
+        try{val c=URL("http://127.0.0.1:48765/lan/join").openConnection() as HttpURLConnection;c.requestMethod="POST";c.doOutput=true;c.readTimeout=3000
+            c.outputStream.use{it.write(JSONObject().put("code",room.code).put("name","HOTSPOT").toString().toByteArray())};assertEquals("HOTSPOT",JSONObject(c.inputStream.bufferedReader().use{it.readText()}).getString("name"));c.disconnect()
+        }finally{fixed.close()}
         assertFalse(LanAddress.candidate("candidate:1 1 UDP 1 8.8.8.8 1234 typ srflx"));assertTrue(LanAddress.candidate("candidate:2 1 TCP 1 192.168.43.10 9 typ host tcptype active"));assertTrue(LanAddress.candidate("candidate:3 1 UDP 1 fd12::2 5555 typ host"));assertFalse(LanAddress.privateV4("8.8.8.8"));assertTrue(LanAddress.privateV4("192.168.43.1"));assertTrue(LanAddress.privateV6("fd12::2"))
     }
     @Test fun privateIdentityResumesWithoutMergingNames(){
