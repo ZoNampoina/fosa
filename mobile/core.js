@@ -41,7 +41,7 @@ export class WebLanClient {
     if(!['offer','answer'].includes(type))return;if(type==='answer'&&l.pc.signalingState==='stable')return;const embedded=sdpCandidates(data.sdp);await l.pc.setRemoteDescription({type,sdp:lanSdp(data.sdp)});l.remote=true;l.remoteCandidates=Math.max(l.remoteCandidates,embedded.size);for(const c of l.ice)await l.pc.addIceCandidate(c);l.ice=[];
     if(type==='offer'){await l.pc.setLocalDescription(await l.pc.createAnswer());await this.signal(from,'answer',{type:'answer',sdp:lanSdp(l.pc.localDescription.sdp)});}
   }
-  async poll(){if(this.polling||!this.profile)return;this.polling=true;try{this.measureMic();const q=await this.api('poll',{after:this.ack,talk:this.talking,target:this.target,level:this.talking?this.level:null});this.members=q.members;this.sessionName=q.sessionName;this.error='';this.applyListen();
+  async poll(){if(this.polling||!this.profile)return;this.polling=true;try{this.measureMic();const q=await this.api('poll',{after:this.ack,talk:this.talking,target:this.target,level:this.talking?this.level:null});this.members=q.members;this.sessionName=q.sessionName;this.error='';this.applyListen();this.refreshTalk();
     const ids=new Set(q.members.filter(m=>m.id!==this.profile.id&&m.online).map(m=>m.id));for(const id of this.links.keys())if(id!==this.host&&!ids.has(id))this.remove(id);
     for(const id of ids){const generation=q.members.find(m=>m.id===id)?.generation??1;if(this.links.has(id)&&this.links.get(id).generation!==generation)this.remove(id);if(!this.links.has(id)){this.make(id);if(this.profile.id<id)await this.offerTo(id);}}
     for(const s of q.signals){if(s.generation==null||q.members.some(m=>m.id===s.from&&(m.generation??1)===s.generation))await this.receive(s);this.ack=Math.max(this.ack,s.seq);}

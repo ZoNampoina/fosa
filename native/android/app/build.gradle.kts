@@ -8,6 +8,7 @@ android {
     compileSdk = 35
     defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "0.13.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/fosa-web-assets"))
+    packaging { resources.excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF" }
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))

@@ -72,9 +72,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes="FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host's local certificate once. Build commit: $GITHUB_SHA. See docs/mobile/LOCAL-FIRST-REPORT.md."
+          if ! gh release view v0.13.0 >/dev/null 2>&1; then
+            gh release create v0.13.0 FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA 0.13.0 · LOCAL-FIRST PAIRING" --notes "$notes" --latest=false
+          fi
           if gh release view android-latest >/dev/null 2>&1; then
             gh release upload android-latest FOSA-Android.apk --clobber
-            gh release edit android-latest --title "FOSA Android v0.13.0" --notes "FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host’s local certificate once. See docs/mobile/LOCAL-FIRST-REPORT.md." --latest
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-latest" -f sha="$GITHUB_SHA" -F force=true
+            gh release edit android-latest --title "FOSA Android v0.13.0" --notes "$notes" --latest
           else
-            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.13.0" --notes "FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host’s local certificate once. See docs/mobile/LOCAL-FIRST-REPORT.md." --latest
+            gh release create android-latest FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA Android v0.13.0" --notes "$notes" --latest
           fi
