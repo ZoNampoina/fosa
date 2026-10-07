@@ -64,7 +64,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
                 if(error.startsWith("Microphone")||error.startsWith("Capture"))error=""
                 val now=System.nanoTime();if(now-sampleTime>150000000L){sampleTime=now;val data=a.data;val b=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);var sum=0.0;var count=0;while(b.remaining()>=2){val v=b.short/32768.0;sum+=v*v;count++};level=if(count>0)max(-120.0,20*log10(max(1e-6,sqrt(sum/count)))) else null}
             }.createAudioDeviceModule()
-        factory=PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
+        val localOnly=PeerConnectionFactory.Options().apply{networkIgnoreMask=PeerConnectionFactory.Options.ADAPTER_TYPE_CELLULAR or PeerConnectionFactory.Options.ADAPTER_TYPE_VPN}
+        factory=PeerConnectionFactory.builder().setOptions(localOnly).setAudioDeviceModule(adm).createPeerConnectionFactory()
         source=if(mic)createMicrophone() else null
     }
     private fun createMicrophone()=factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression","true"));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))})
