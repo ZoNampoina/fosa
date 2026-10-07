@@ -25,7 +25,7 @@ class MobileService:Service() {
     private val main=Handler(Looper.getMainLooper())
     // A P2P discovery/group operation can wait on the worker. Existing peers
     // must still see their host online, and held Talk keeps its safety limit.
-    private val ownerBeat=object:Runnable{override fun run(){if(instance!==this@MobileService)return;val engine=rtc;val host=room;if(engine!=null&&host!=null){if(engine.talkRequested&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false);host.touchOwner(engine.talking,engine.target,engine.level);lastPoll=SystemClock.elapsedRealtime()};main.postDelayed(this,1000)}}
+    private val ownerBeat=object:Runnable{override fun run(){if(instance!==this@MobileService)return;val engine=rtc;val host=room;if(engine!=null&&host!=null){if(engine.talkRequested&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false);host.touchOwner(engine.talking,engine.target,engine.level);if(LanAddress.ip(this@MobileService)!=null)lastPoll=SystemClock.elapsedRealtime()};main.postDelayed(this,1000)}}
     private val publication=java.util.concurrent.atomic.AtomicLong();private var appliedPublication=0L
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var https:LanHttp?=null;private var rtc:RtcMobile?=null
@@ -207,7 +207,7 @@ class MobileService:Service() {
         if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
     }catch(e:Exception){rtc?.push(false);if(connectionPhase!=ConnectionPhase.RECONNECTING)reconnectCount++;connectionPhase=ConnectionPhase.RECONNECTING;phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish();recoverConnection()}}
-    private fun recoverConnection(){if(SystemClock.elapsedRealtime()-lastReconnectAttempt<7000||lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<6000)return
+    private fun recoverConnection(){if(SystemClock.elapsedRealtime()-lastReconnectAttempt<7000||room==null&&lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<6000)return
         lastReconnectAttempt=SystemClock.elapsedRealtime()
         if(room!=null){if(connection.transport==TransportKind.WIFI_DIRECT)try{networkIp=connection.hostNetwork();getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);rtc?.reset();startLocalServers();advertise()}catch(e:Exception){error=e.message.orEmpty()};return}
         if(joiningCode.isBlank())return
