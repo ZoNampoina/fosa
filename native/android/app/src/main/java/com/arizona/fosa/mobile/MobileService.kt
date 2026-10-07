@@ -236,6 +236,7 @@ class MobileService:Service() {
     fun enableWebPairing(ttl:Long=120000){if(room==null)return;webPairingUntil=SystemClock.elapsedRealtime()+ttl;enqueue{rendezvousCycle()};publish()}
     fun repairAudio(){enqueue{rtc?.let{forceRepair(it)}}}
     fun target(value:String){rtc?.let{it.push(false,value)};publish()}
+    fun listen(value:String){rtc?.listen(value);publish()}
     fun panic(active:Boolean){if(!active)routeWarning="";rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
     fun volume(value:Double){rtc?.volume(value);publish()}
     fun memberMute(id:String,value:Boolean){rtc?.memberMute(id,value);publish()}
@@ -297,7 +298,7 @@ class MobileService:Service() {
     private fun publish(){val version=publication.incrementAndGet();val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected).put("iceState",l.iceState).put("localCandidates",l.localCandidates).put("remoteCandidates",l.remoteCandidates))}
         val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
-            .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("talkRequested",engine?.talkRequested ?: false).put("target",engine?.target ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
+            .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("talkRequested",engine?.talkRequested ?: false).put("target",engine?.target ?: "all").put("listenTarget",engine?.listenTarget ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("local",LanAddress.ip(this)!=null).put("webPairing",room!=null&&SystemClock.elapsedRealtime()<webPairingUntil).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
         val apply={if(instance===this&&version>appliedPublication){appliedPublication=version;state=s}}
