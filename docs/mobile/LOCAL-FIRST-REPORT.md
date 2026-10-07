@@ -120,13 +120,13 @@ Les nouveaux adaptateurs réseau et locators sont séparés du coordinateur et d
 
 ## Validation et publication
 
-Version : **0.13.0**, Android versionCode **20**. Code de référence soumis aux tests : `fe4bdc3032b868bfa80ef9cbccc747117b738241`. [PR de livraison #6](https://github.com/ZoNampoina/fosa/pull/6). Le SHA du commit réellement distribué est indiqué dans les notes de release et la fiche des workflows après fusion ; ne pas confondre ce SHA avec celui de la branche testée.
+Version : **0.13.0**, Android versionCode **20**. Commit applicatif réellement distribué : [`fbe8bfe3b403097eee425bb2cd4861f0c1e922b9`](https://github.com/ZoNampoina/fosa/commit/fbe8bfe3b403097eee425bb2cd4861f0c1e922b9), sur `main` et le tag `v0.13.0`. [PR de livraison #6](https://github.com/ZoNampoina/fosa/pull/6). La révision `fe4bdc3032b868bfa80ef9cbccc747117b738241` reste la référence des essais préparatoires ci-dessous ; les workflows du commit distribué ont ensuite répété les vérifications avec succès.
 
 ### TESTÉ AUTOMATIQUEMENT
 
 [Verify FOSA Audio — révision de référence](https://github.com/ZoNampoina/fosa/actions/runs/37659606739) : **succès**.
 
-- Bridge Python : 41 tests exécutés sur Linux et Windows ; 2 ignorés par la suite existante. Les tests PCM/worklet couvrent stéréo, réordonnancement, wrap, perte, backlog, purge et conversion de fréquence.
+- Bridge Python : 41 tests recensés sur Linux et Windows, soit 39 réussis et 2 ignorés par la suite existante. Les tests PCM/worklet couvrent stéréo, réordonnancement, wrap, perte, backlog, purge et conversion de fréquence.
 - Chromium/WebKit : régressions des parcours existants, véritable Opus décodé, routage Talk/écoute et révocation, PTT tenu, reprise d'identité, redémarrage ICE, cache PWA hors ligne. Le test historique utilise volontairement l'ancien protocole pour vérifier sa compatibilité ; il n'est pas le nouveau parcours normal.
 - Scénario local-first Chromium : vrais HTTP challenge/join et WebRTC, audio Opus décodé dans les deux sens, entrée automatique depuis une URL QR courte, même membre après reprise, génération augmentée, redémarrage ICE, contrôle/audio continuant après blocage du coordinateur HTTP. **Zéro requête vers un domaine externe dans ce scénario.** Coordinateur en fixture Node ; ce test n'est pas une liaison Android hôte ↔ navigateur.
 - Préparation iOS : package Swift compilé sur macOS ; aucune application iOS native ni IPA livrée.
@@ -165,6 +165,32 @@ La capture local-first de la révision de référence observe **Opus, DTLS conne
 - [Web GitHub Pages](https://zonampoina.github.io/fosa/mobile/), facultatif ; le Web local est fourni par l'APK.
 
 Les workflows de `main` vérifient de nouveau le code avant de publier l'APK et GitHub Pages. Le workflow Android configure explicitement le fichier de signature mis en cache, plutôt que de supposer l'emplacement de la clé générée par Gradle. La version ne doit pas être déclarée validée sur appareils physiques avant exécution de la checklist suivante.
+
+## Revérification après reprise — 8 octobre 2026
+
+La reprise a retrouvé la livraison déjà terminée : la branche de validation avait été fusionnée dans `main`, puis l'APK et GitHub Pages publiés. Les sources de l'application retrouvées dans le checkout interrompu correspondent au commit distribué ; le dernier ajustement du workflow de signature est également présent sur `main`.
+
+| Élément vérifié | Preuve | Résultat |
+|---|---|---|
+| Vérifications audio du commit distribué | [Verify FOSA Audio](https://github.com/ZoNampoina/fosa/actions/runs/37663190040) | Succès pour navigateur, bridge Windows/Linux et compilation du package de préparation iOS |
+| APK et tests Android du commit distribué | [Build FOSA Android APK](https://github.com/ZoNampoina/fosa/actions/runs/37663190652) et journal du job `build` | Build réussi ; 10 tests fonctionnels sur émulateur API 35 et 1 capture visuelle réussis ; publication réussie |
+| Parcours local-first du build distribué | [Journal navigateur](https://github.com/ZoNampoina/fosa/actions/runs/37663190652/job/112935641688) | Vrais HTTP et Opus décodé dans les deux sens ; paire host/host, DTLS, zéro requête externe ; identité conservée et reprise ICE ; fixture de coordinateur Node |
+| Bridge Python du build distribué | [Journal Linux](https://github.com/ZoNampoina/fosa/actions/runs/37663190652/job/112935641958) | 39 réussis, 2 ignorés ; tests PCM/worklet réussis |
+| Publication Web | [Deploy FOSA to GitHub Pages](https://github.com/ZoNampoina/fosa/actions/runs/37663190690) | Succès |
+| APK réellement téléchargé depuis la release versionnée | Lecture du manifeste binaire et du ZIP de l'APK publié | HTTP 200 ; `com.arizona.fosa` ; versionName `0.13.0` ; versionCode `20` ; 63 104 880 octets |
+| Web fourni par cet APK | Comparaison octet par octet des 9 assets `assets/fosa-web/` avec le commit distribué | 9 sur 9 identiques, dont `connection.js`, `qr.js`, `sw.js`, manifeste et icône |
+| Web réellement servi par GitHub Pages | Téléchargement et comparaison octet par octet de ces mêmes 9 fichiers | HTTP 200 et contenu identique au commit distribué pour chaque fichier |
+| Vérification PCM après reprise | Exécution locale de `node audio-bridge/tests/pcm_worklet.cjs` | Succès : stéréo, réordonnancement, wrap, perte, backlog, purge et conversion de fréquence |
+
+SHA-256 de l'APK versionné téléchargé :
+
+```text
+8c48e6dbcc36e3eccf547f2b71006fa51b699d6038442262f5d788920b3d3252
+```
+
+Les résultats Android et média ci-dessus proviennent des journaux du commit effectivement publié. Les vérifications de fichiers et du PCM ont été effectuées pendant cette reprise. Le contrôle navigateur supplémentaire n'a pas pu démarrer dans cet environnement : le binaire Chromium est absent et son téléchargement n'a pas fourni d'archive exploitable. Ce contrôle n'est donc pas compté comme réussi ; les tests navigateur retenus sont ceux de la CI sur le code distribué.
+
+**NÉCESSITE TEST SUR APPAREIL PHYSIQUE** : formation d'un groupe Wi-Fi Direct, lecture des QR par caméra et liaison Android ↔ Android ou Android ↔ PC avec WAN réellement débranché. La checklist A–J précise les manipulations et les preuves attendues.
 
 ## Checklist physique obligatoire — résultat actuellement NON EFFECTUÉ
 
