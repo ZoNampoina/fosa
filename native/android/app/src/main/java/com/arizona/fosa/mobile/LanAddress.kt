@@ -16,7 +16,7 @@ object LanAddress {
         return cm.allNetworks.firstOrNull{n->
             val caps=cm.getNetworkCapabilities(n)
             val local=caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true||caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)==true
-            local&&cm.getLinkProperties(n)?.routes?.any{r->r.destination.contains(target)}==true
+            local&&cm.getLinkProperties(n)?.routes?.any{r->!r.isDefaultRoute&&r.destination.contains(target)}==true
         }
     }
     fun gateway(ctx:Context):String? { val cm=ctx.getSystemService(ConnectivityManager::class.java);val n=wifi(ctx) ?: return null;return cm.getLinkProperties(n)?.routes?.firstOrNull{r->r.isDefaultRoute&&r.gateway?.hostAddress?.let{privateV4(it)}==true}?.gateway?.hostAddress }
@@ -24,6 +24,16 @@ object LanAddress {
         return NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|p2p|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.firstOrNull{privateV4(it)}
     }
     fun ips():List<String> = try{NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.filter{privateV4(it)}.distinct()}catch(_:Exception){emptyList()}
+    /** Select the host address reachable from this peer, even with LAN and P2P
+     * interfaces active together. A Wi-Fi default route is not a P2P route. */
+    fun sourceForPeer(peer:String):String? = try {
+        val target=InetAddress.getByName(peer).address
+        NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|p2p|ap\\d|swlan|eth).*"))}
+            .flatMap{it.interfaceAddresses}.filter{a->val own=a.address.address;val bits=a.networkPrefixLength.toInt()
+                own.size==4&&target.size==4&&privateV4(a.address.hostAddress.orEmpty())&&bits in 1..32&&
+                    (0 until bits).all{i->((own[i/8].toInt() xor target[i/8].toInt()) and (1 shl (7-i%8)))==0}}
+            .maxByOrNull{it.networkPrefixLength}?.address?.hostAddress
+    }catch(_:Exception){null}
     fun localCandidate(ctx:Context,value:String):Boolean {
         val ip=value.trim().split(Regex("\\s+")).getOrNull(4) ?: return false
         if(ip.endsWith(".local"))return true
