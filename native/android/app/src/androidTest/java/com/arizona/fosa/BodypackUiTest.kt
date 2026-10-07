@@ -35,6 +35,8 @@ class BodypackUiTest {
         ctx.getSharedPreferences("bodypack",0).edit().clear().commit()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS").close()
+        val nearby=if(android.os.Build.VERSION.SDK_INT>=33)"android.permission.NEARBY_WIFI_DEVICES" else "android.permission.ACCESS_FINE_LOCATION"
+        inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} $nearby").close()
         val server=ServerSocket(0);val active=AtomicBoolean(true);val status=AtomicInteger(200)
         val worker=Thread{while(active.get())try{server.accept().use{socket->socket.soTimeout=2000
             val input=socket.getInputStream().bufferedReader();input.readLine();while(true){val line=input.readLine()?:break;if(line.isEmpty())break}
