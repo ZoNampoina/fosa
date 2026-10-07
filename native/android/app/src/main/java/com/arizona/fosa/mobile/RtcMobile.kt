@@ -41,6 +41,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val factory:PeerConnectionFactory
     private var source:AudioSource?
     init {
+        val nearby=if(android.os.Build.VERSION.SDK_INT>=33)android.Manifest.permission.NEARBY_WIFI_DEVICES else android.Manifest.permission.ACCESS_FINE_LOCATION
+        NetworkMonitorAutoDetect.setIncludeWifiDirect(ctx.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_WIFI_DIRECT)&&ctx.checkSelfPermission(nearby)==android.content.pm.PackageManager.PERMISSION_GRANTED)
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions())
         adm=JavaAudioDeviceModule.builder(ctx).setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setSampleRate(48000)
             .setAudioRecordErrorCallback(object:JavaAudioDeviceModule.AudioRecordErrorCallback {

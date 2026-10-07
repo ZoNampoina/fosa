@@ -25,6 +25,7 @@ class FosaConnectionManager(private val ctx:Context,private val changed:(Connect
     private fun scanLan(){lan.discover(::record){}}
     fun announce(q:JSONObject){lan.announce(q);direct.announce(q)}
     fun hostNetwork():String {
+        if(transport==TransportKind.HOTSPOT){val end=System.currentTimeMillis()+4000;while(System.currentTimeMillis()<end){hotspot.address()?.let{return it};Thread.sleep(100)};throw IllegalArgumentException("Le réseau FOSA local ne fournit pas encore d’adresse. Réessaie.")}
         LanAddress.ip(ctx)?.let{if(transport!=TransportKind.HOTSPOT)transport=TransportKind.LAN;return it}
         transport=TransportKind.WIFI_DIRECT;phase(ConnectionPhase.CONNECTING_NETWORK)
         awaitNetwork{ok,fail->direct.createGroup(ok,fail)}
@@ -70,6 +71,7 @@ class FosaConnectionManager(private val ctx:Context,private val changed:(Connect
         throw IllegalArgumentException("Session non trouvée. Vérifie le code et le Wi-Fi. ${p2pError.ifBlank{"L’hôte peut créer un réseau FOSA local."}}")
     }
     private fun probe(address:String,code:String,id:String):LocalSession?=try {
+        bind(address)
         val q=request(address,"info",JSONObject())
         if(id.isNotBlank()&&q.optString("session")!=id||q.optString("code").isNotBlank()&&q.optString("code")!=code)null
         else LocalSession.from(q,address,transport)

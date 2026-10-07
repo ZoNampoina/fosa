@@ -65,7 +65,7 @@ class MobileService:Service() {
         if(rtc!=null)return
         unadvertise();http?.close();http=null;room=null;wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()}
         networkIp=if(i.getBooleanExtra("host",false))connection.hostNetwork() else LanAddress.ip(this).orEmpty()
-        val network=LanAddress.wifi(this);getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(network)
+        val network=LanAddress.wifi(this);getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(if(room!=null||connection.transport==TransportKind.HOTSPOT||connection.transport==TransportKind.WIFI_DIRECT)null else network)
         audio.mode=AudioManager.MODE_IN_COMMUNICATION
         @Suppress("DEPRECATION")
         run {audio.isSpeakerphoneOn=!audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any{it.type in listOf(AudioDeviceInfo.TYPE_WIRED_HEADPHONES,AudioDeviceInfo.TYPE_WIRED_HEADSET,AudioDeviceInfo.TYPE_USB_HEADSET,AudioDeviceInfo.TYPE_USB_DEVICE)}}
@@ -187,10 +187,10 @@ class MobileService:Service() {
         val engine=rtc ?: return
         val now=SystemClock.elapsedRealtime();if(engine.talkRequested&&now>talkUntil)engine.push(false)
         if(engine.talkRequested&&!engine.talking&&repairDue>0&&now>=repairDue){forceRepair(engine);repairDue=now+5000}
-        val ip=LanAddress.ip(this)
+        val ip=if(room!=null&&connection.transport==TransportKind.HOTSPOT)connection.hotspot.address() else LanAddress.ip(this)
         if(ip==null){engine.push(false);connectionPhase=ConnectionPhase.RECONNECTING;phase="Réseau perdu · reconnexion";publish();recoverConnection();return}
         if(ip!=networkIp){engine.push(false);engine.reset();networkIp=ip;if(room==null)connection.bind(address) else getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(LanAddress.wifi(this));if(room!=null){startLocalServers();advertise()}}
-        if(room!=null&&LanAddress.ips().toSet()!=servedAddresses){startLocalServers();advertise()}
+        if(room!=null&&LanAddress.ips().toSet()!=servedAddresses){if(connection.direct.groupInterface.isNotBlank())getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);startLocalServers();advertise()}
         session=call("poll",JSONObject().put("after",ack).put("talk",engine.talking).put("target",engine.target).put("level",if(engine.talking)engine.level else JSONObject.NULL))
         lastPoll=SystemClock.elapsedRealtime();error="";phase="Session connectée";connectionPhase=if(engine.links.values.any{it.connected})ConnectionPhase.CONNECTED else ConnectionPhase.NEGOTIATING_AUDIO
         val members=session.getJSONArray("members");val list=(0 until members.length()).map{members.getJSONObject(it)}

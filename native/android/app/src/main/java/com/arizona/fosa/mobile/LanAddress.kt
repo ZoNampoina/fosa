@@ -23,7 +23,7 @@ object LanAddress {
     fun ip(ctx:Context):String? { val cm=ctx.getSystemService(ConnectivityManager::class.java);wifi(ctx)?.let{cm.getLinkProperties(it)?.linkAddresses?.firstOrNull{a->privateV4(a.address.hostAddress ?: "")}?.let{a->return a.address.hostAddress}}
         return NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|p2p|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.firstOrNull{privateV4(it)}
     }
-    fun ips():List<String> = try{NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.filter{privateV4(it)}.distinct()}catch(_:Exception){emptyList()}
+    fun ips():List<String> = try{NetworkInterface.getNetworkInterfaces().toList().filter{it.isUp&&!it.isLoopback&&it.name.matches(Regex("(?i).*(wlan|wifi|p2p|ap\\d|swlan|eth).*"))}.flatMap{it.inetAddresses.toList()}.mapNotNull{it.hostAddress}.filter{privateV4(it)}.distinct()}catch(_:Exception){emptyList()}
     /** Select the host address reachable from this peer, even with LAN and P2P
      * interfaces active together. A Wi-Fi default route is not a P2P route. */
     fun sourceForPeer(peer:String):String? = try {

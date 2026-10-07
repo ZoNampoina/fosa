@@ -8,7 +8,10 @@ import android.os.Build
 
 class LocalHotspot(private val ctx:Context):AutoCloseable {
     private var reservation:WifiManager.LocalOnlyHotspotReservation?=null
+    private var previousAddresses=emptySet<String>()
+    fun address():String?=LanAddress.ips().firstOrNull{it !in previousAddresses}
     @Suppress("DEPRECATION") fun create(ready:(String,String)->Unit,failed:(String)->Unit){
+        previousAddresses=LanAddress.ips().toSet()
         try{ctx.applicationContext.getSystemService(WifiManager::class.java).startLocalOnlyHotspot(object:WifiManager.LocalOnlyHotspotCallback(){
             override fun onStarted(r:WifiManager.LocalOnlyHotspotReservation){reservation=r
                 val ssid=if(Build.VERSION.SDK_INT>=30)r.softApConfiguration.ssid else r.wifiConfiguration?.SSID
