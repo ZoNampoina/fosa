@@ -67,20 +67,25 @@ try {
  for(const size of [{width:320,height:700},{width:375,height:667},{width:844,height:390},{width:1024,height:768}]){await host.setViewportSize(size);assert(await host.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert(await host.evaluate(()=>{const top=document.querySelector('nav').getBoundingClientRect().top;return ['ptt','panic'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return b.top>=0&&b.bottom<=top;});}),'Talk and Panic Mute must fit above navigation on phones and tablets');await host.screenshot({path:path.join(out,`mobile-web-${size.width}.png`)});}
  // A reloaded device rejoins by its private identity, preserving one roster row.
  const oldIdentity=await b.evaluate(()=>({id:fosaMobile.profile.id,token:fosaMobile.profile.token,key:JSON.parse(localStorage.getItem('fosa-lan-session:123456')).clientKey}));
- let codeAnswer='';
+ let codeAnswers=[],codePolls=0;
  await b.route('**/functions/v1/pair-rendezvous',async route=>{
    const headers={'access-control-allow-origin':'*','access-control-allow-headers':'apikey,content-type','access-control-allow-methods':'POST, OPTIONS'};
    if(route.request().method()==='OPTIONS'){await route.fulfill({status:204,headers});return;}
    const q=route.request().postDataJSON();
    if(q.action==='guest-offer'){
-     codeAnswer=await host.evaluate(async({offer,identity})=>{
+     codeAnswers=await host.evaluate(async({offer,identity})=>{
        const {unpack,pack}=await import('./core.js');const q=await unpack(offer);if(q.resumeToken!==identity.token||q.clientKey!==identity.key)throw Error('Missing private resume credential');
        const f=fosaMobile,m=fixture.members.find(m=>m.id===identity.id);m.generation++;m.online=true;m.talk=false;fixture.mail.set(m.id,[]);for(const [id,mail] of fixture.mail)fixture.mail.set(id,mail.filter(s=>s.from!==m.id));
        f.remove(m.id);f.members=fixture.members;f.make(m.id,true);await f.receive({from:m.id,type:'offer',data:{sdp:q.sdp}});
-       await new Promise(r=>setTimeout(r,3000));return pack({type:'answer',sdp:f.links.get(m.id).pc.localDescription.sdp,host:f.profile.id,profile:{id:m.id,name:m.name,role:m.role,token:identity.token,generation:m.generation,session:'fixture-session',sessionName:'BAND LIVE'}});
+       await new Promise(r=>setTimeout(r,3000));
+       const link=f.links.get(m.id),sdp=link.pc.localDescription.sdp,lines=sdp.split('\r\n'),ice=[];let mid=null,mline=-1;
+       for(const line of lines){if(line.startsWith('m=')){mline++;mid=null;}else if(line.startsWith('a=mid:'))mid=line.slice(6);else if(line.startsWith('a=candidate:'))ice.push({candidate:line.slice(2),sdpMid:mid,sdpMLineIndex:mline});}
+       if(!ice.length)throw Error('Fixture host produced no ICE candidates');
+       const stripped=lines.filter(line=>!line.startsWith('a=candidate:')).join('\r\n'),profile={id:m.id,name:m.name,role:m.role,token:identity.token,generation:m.generation,session:'fixture-session',sessionName:'BAND LIVE'};
+       return [await pack({type:'answer',sdp:stripped,ice:[],host:f.profile.id,profile}),await pack({type:'answer',sdp:stripped,ice,host:f.profile.id,profile})];
      },{offer:q.offer,identity:oldIdentity});
-     await route.fulfill({headers,json:{id:'resume-fixture'}});
-   }else if(q.action==='guest-poll')await route.fulfill({headers,json:{answer:codeAnswer}});else throw Error('Unexpected rendezvous action');
+     codePolls=0;await route.fulfill({headers,json:{id:'resume-fixture'}});
+   }else if(q.action==='guest-poll'){const answer=codeAnswers[Math.min(codePolls++,codeAnswers.length-1)]||null;await route.fulfill({headers,json:{answer}});}else throw Error('Unexpected rendezvous action');
  });
  await b.reload();await b.evaluate(()=>{globalThis.FOSA_DISABLE_RENDEZVOUS=false;window.realCapture=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async()=>{throw new DOMException('Permission denied for test','NotAllowedError');};});await b.click('#join');await b.fill('[name="name"]','JOHN');await b.fill('[name="role"]','DRUMS');await b.fill('[name="code"]','123456');await b.click('#join-form button');
  await b.waitForFunction(()=>fosaMobile.profile?.generation===2&&fosaMobile.links.size===2&&[...fosaMobile.links.values()].every(l=>l.pc.connectionState==='connected'),null,{timeout:25000});
@@ -100,5 +105,5 @@ try {
  assert.deepEqual(errors,[]);await Promise.all(contexts.map(context=>context.close()));await browser.close();browser=null;
  // WebKit PWA cache and responsive UI; actual iPhone microphone/hardware not claimed.
  browser=await webkit.launch();const wc=await browser.newContext({viewport:{width:390,height:844}});await wc.addInitScript(()=>{globalThis.FOSA_DISABLE_RENDEZVOUS=true;});const wp=await wc.newPage();await wp.goto(base);await wp.waitForFunction(()=>!!navigator.serviceWorker.controller);await wp.click('#join');await wp.click('#join-form button');assert((await wp.textContent('#join-error')).includes('6 chiffres'));assert(await wp.evaluate(()=>!fosaMobile.raw&&!fosaMobile.links.size));await wp.screenshot({path:path.join(out,'mobile-web-webkit-code-help.png')});await wp.click('#sheet .close');await wp.click('#offline');await wp.waitForSelector('#sheet-content .status');assert.equal(await wp.textContent('#sheet-content .status'),'READY');await new Promise(resolve=>server.close(resolve));await wp.reload();assert((await wp.textContent('h1')).includes('Your stage'));await wp.screenshot({path:path.join(out,'mobile-web-webkit-offline.png')});await wc.close();
- console.log('PASS: code-first join form, LAN IPv4/TCP + private IPv6 candidates, PTT intent retained before ICE connection, offline QR fallback, blank/invalid code help, failed preparation cleanup and retry, real direct Opus decoded, real held-touch/keyboard PTT, microphone permission upgrade without closing the listening link, saved-identity reload with actual audio recovery and no duplicate members, private/all PTT, local RPC without HTTP, panic, responsive screens, Chromium/WebKit offline shell. Phone hardware and iOS native not tested.');
+ console.log('PASS: code-first join form, LAN IPv4/TCP + private IPv6 candidates, late host ICE refresh during code rendezvous, PTT intent retained before ICE connection, offline QR fallback, blank/invalid code help, failed preparation cleanup and retry, real direct Opus decoded, real held-touch/keyboard PTT, microphone permission upgrade without closing the listening link, saved-identity reload with actual audio recovery and no duplicate members, private/all PTT, local RPC without HTTP, panic, responsive screens, Chromium/WebKit offline shell. Phone hardware and iOS native not tested.');
 }catch(e){if(browser){for(const context of browser.contexts())for(const p of context.pages())try{console.log('Failure peers',await p.evaluate(()=>({error:window.fosaMobile?.error,links:[...(window.fosaMobile?.links||[])].map(([id,l])=>({id,state:l.pc.connectionState,signaling:l.pc.signalingState,channel:l.channel?.readyState,local:l.pc.localDescription?.sdp.split('\r\n').filter(x=>x.startsWith('a=candidate:')),remote:l.pc.remoteDescription?.sdp.split('\r\n').filter(x=>x.startsWith('a=candidate:'))}))})));}catch{}}throw e;}finally{await browser?.close();server.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
