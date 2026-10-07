@@ -58,7 +58,7 @@ function joinForm(values={name:"ZO",role:"SAX",code:""},failure="",allowOffline=
     if(invalid){error.textContent=invalid==="code"?"Saisissez le code à 6 chiffres affiché par l’hôte.":"Indiquez votre nom pour rejoindre la session.";error.hidden=false;form.elements[invalid].setAttribute("aria-invalid","true");form.elements[invalid].focus();return;}
     if(client.offer)client.close();
     const submit=form.querySelector("button:not([type])");submit.disabled=true;submit.textContent="CONNECTING…";error.hidden=true;$("#join-progress").hidden=false;
-    try{await client.prepare(values);await pairByCode(values);}catch(e){const keep=!!client.offer;joinForm(values,(e.message||e)+". "+(keep?"Tu peux utiliser le mode hors ligne si l’hôte n’a pas Internet.":"Réessaie."),keep);}
+    try{await client.prepare(values);await pairByCode(values);}catch(e){const keep=!!client.offer;let message=e.message||e;if(message==="Session unavailable")message="Sur l’hôte Android, ouvre MEMBERS → CODE / QR puis réessaie";joinForm(values,message+". "+(keep?"Tu peux aussi choisir 100% LOCAL · OFFLINE QR.":"Réessaie."),true);}
   };
 }
 function repairSession(){const values={name:client.profile?.name||"ZO",role:client.profile?.role||"",code:client.joinCode||""};client.close();client.profile=null;tab="HOME";draw(true);joinForm(values,"La liaison directe LAN a été perdue. Ré-appaire l’appareil : par code si Internet est disponible, ou par QR pour rester 100 % local.",true);}
