@@ -1,35 +1,15 @@
-# FOSA transport contract
+# FOSA Mobile LocalTransport — v2
 
-## Etats
-idle | discovering | connecting | connected | migrating | failed
+LocalTransport owns discovery, announcement, network formation/connection and cleanup. It never owns Session/Auth/SDP/audio. Android contract: `native/android/app/src/main/java/com/arizona/fosa/mobile/LocalTransport.kt`.
 
-## Transports
-nearby-bluetooth
-nearby-wifi
-lan-webrtc
-internet-direct
-turn-relay
+Priority: existing LAN → Android Wi-Fi Direct → explicitly created local hotspot. Legacy Internet rendezvous is optional compatibility, never media relay and never required for local entry.
 
-## Règle de bascule
-- Ne pas couper le chemin actif tant qu'un nouveau chemin n'est pas connected.
-- Une fois le nouveau chemin prêt, dupliquer le contrôle pendant 250 ms.
-- Basculer l'audio sur le chemin ayant la plus faible latence mesurée.
-- Conserver le chemin précédent 1 seconde comme secours si possible.
+States: DISCOVERING / FOUND / AUTHENTICATING / CONNECTING_NETWORK / SIGNALING / NEGOTIATING_AUDIO / CONNECTED / RECONNECTING / FAILED.
 
-## Contrôle
-{
-  "type": "ptt|presence|target|priority|ping",
-  "peerId": "...",
-  "role": "Chef",
-  "target": "all|role:Piano|group:rythmique|peer:...",
-  "seq": 1,
-  "ts": 0
-}
+LAN uses DNS-SD, bounded UDP metadata, local HTTP/HTTPS coordinator and Opus/SRTP peer links. AndroidWifiDirectTransport uses WifiP2pManager, service/peer discovery and group/connection info. Group owner and Session owner are distinct concepts; verify session ID before authentication.
 
-## Audio
-- Opus mono
-- 48 kHz
-- ULTRA : ptime 10 ms
-- LOW : ptime 10 ms
-- STABLE : ptime 20 ms + FEC
-- numéro de séquence + timestamp obligatoire
+Future adapters: IOSPeerTransport (Bonjour / platform-supported peer networking) and WindowsWifiDirectTransport. They implement their platform capabilities and supply a local coordinator locator. They cannot assume Android WifiP2pManager support. A Web adapter only joins an already reachable local origin; it does not form P2P networks.
+
+Session/auth/signaling are [FOSA LAN/2](../docs/mobile/PROTOCOL.md). Code is a session selector; private clientKey/resumeToken/generation belong to session identity. Never carry SDP/ICE or private member tokens in QR.
+
+No live radio handover or migration of a session owner is claimed in this version. Network changes repair the existing identity; browsers may need to reopen a new local host address. Preserve Bodypack/MR18 transport separately.

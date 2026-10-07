@@ -86,6 +86,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
           FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
         run: node mobile/tests/browser.cjs
+      - name: Verify local-first code pairing and direct audio without cloud
+        env:
+          NODE_PATH: ${{ runner.temp }}/fosa-browser/node_modules
+          FOSA_BROWSER_OUTPUT: ${{ runner.temp }}/fosa-browser-output
+        run: node mobile/tests/local-first.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

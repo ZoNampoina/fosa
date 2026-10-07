@@ -1,32 +1,43 @@
-# FOSA LAN protocol 1
-This version is separate from the MR18/PC Bodypack PCM engine. A phone coordinates a Mobile session; Opus audio flows directly between peers, never through its HTTP coordinator or the Internet.
+# FOSA LAN protocol 2 — Local first, Internet optional
 
-## Discovery and control
-Native Android stays LAN-only by default. The host prefers local TCP port `48765`; a joining Android first probes the Wi-Fi/hotspot default gateway on that port, then also uses Bonjour/mDNS `_fosa-mobile._tcp.` discovery. This makes hotspot pairing less dependent on multicast while retaining mDNS on normal LANs. Private RFC1918 IPv4 only; no cellular/Internet dependency. Native Android joins by six-digit code only. Manual address and QR remain fallbacks.
+Compatibilité : endpoints et identités du protocole 1 conservés. Le Bodypack PCM/MR18 est un moteur distinct.
 
-`POST /lan/info`, `/lan/join`, `/lan/poll`, `/lan/signal`, `/lan/group`, `/lan/leave`; UTF-8 JSON, 32 KiB maximum, bounded queues/timeouts. Join requires a six-digit code; eight failures/minute per remote are refused. Each member receives an unguessable token, ID, session name, leader ID, protocol. Poll, signal, group and leave authenticate `Authorization: Bearer <token>`. Roster never contains tokens. Maximum eight members. A member is online for seven seconds and a Talk indicator expires after 1.5 seconds without refresh. Inactive memberships leave active slots after 60 seconds when a new client joins; up to 64 retired identities remain resumable until the host session ends. Pairing reservations last 90 seconds.
+## Réseau et découverte
 
-Poll fields: `after` (last acknowledged signal seq), `talk`, `target`, `level` (real dBFS or null). Response: session, sessionName, leader, members, signals. Signals: `seq/from/generation/type/data`; types offer, answer, ice, reset. Peers acknowledge only after applying each signal. The smaller member UUID creates offers to avoid glare. The host alone can assign groups. Targets: all, leader, user:UUID, group:NAME. A separate sender AudioTrack per peer prevents private PTT from being broadcast.
+Contrat LocalTransport indépendant de Session/Auth/Signaling/Audio. Implémentations livrées : LanTransport, AndroidWifiDirectTransport ; LocalHotspot crée le LAN de repli. La logique de sélection appartient à FosaConnectionManager, pas à la vue.
 
-## Reconnection identity (0.12.1)
-Join may include a private `resumeToken` from the previous ticket and/or an unguessable `clientKey` persisted before the initial request. A valid session code and matching credential restore the same member ID, token and group. Repeated joins never identify devices by name, instrument or IP. An explicit leave revokes that identity. The roster exposes neither credential.
+LAN existant prioritaire. NSD `_fosa-mobile._tcp.` : protocole, session ID/nom, code, nom/rôle hôte, port, version et nombre de membres. UDP 48764 : requête FOSA-DISCOVERY/2 avec identifiant de recherche aléatoire, réponse de métadonnées bornée à 1800 octets et correspondant à cet identifiant. NSD/UDP ne transportent pas SDP, ICE ou audio. Passerelle TCP 48765 essayée aussi pour les hotspots peu fiables en multicast.
 
-Every accepted rejoin increments the public member `generation`, resets Talk and clears stale SDP/ICE queues. Native and Web peers replace links whose generation changed. Manual browser offers replace the host link before applying their SDP. Signals from older generations are ignored. Android saves the identity per session code; Web saves it per browser installation and code. Clearing app/site data deliberately loses that identity. Applying the change requires updating the Android host as well as clients.
+P2P Android : service `_fosa._tcp`, discoverServices/discoverPeers, connect/createGroup, requestGroupInfo/requestConnectionInfo. Le Group Owner n’est pas aveuglément assimilé à l’hôte : le coordinateur doit répondre avec la session demandée. Bind réseau selon les routes ; à défaut de Network P2P fourni par Android, les sockets utilisent le routage local du système. Aucune API de création P2P n’est supposée dans le navigateur.
 
-## Audio
-WebRTC host candidates only: private IPv4, private/link-local IPv6 or local mDNS; UDP is preferred by ICE and TCP host candidates remain available as LAN fallback. Relay and server-reflexive candidates are discarded. Empty ICE server list: no STUN, TURN or cloud signaling. Opus mono, native requested 48 kHz, hardware may resample. DTLS/SRTP authenticates and encrypts each stream. Full mesh is simple and direct for small groups; CPU/airtime grow with members. No host audio relay or host failover in this release.
+## Canal de signalisation et authentification
 
-RTT, inbound jitter and packet loss come from RTCStats. They do not measure mouth-to-ear latency. End-to-end latency remains null/UNKNOWN. No synthetic VU. Native mic RMS is derived from AudioRecord samples. Web mic RMS is from the actual Web Audio graph. APM supplies echo/noise processing and automatic voice gain; custom native gate/EQ/compressor controls are unavailable. Web adds a real 100 Hz HPF and compressor. There is no claimed IEM safety certification.
+JSON UTF-8, requêtes/queues bornées, huit membres maximum. HTTP local 48765 préféré ; Web HTTPS 48766 avec CA propre à l’installation, à approuver explicitement. POST `/lan/info`, `/lan/challenge`, `/lan/join`, `/lan/auth`, `/lan/reconnect`, `/lan/poll`, `/lan/signal`, `/lan/group`, `/lan/permissions`, `/lan/leave`, `/lan/ping`, `/lan/members`, `/lan/talk`. GET `/lan/info` fournit les métadonnées du Web local.
 
-## Browser code rendezvous
-A cached HTTPS PWA cannot directly enumerate Android mDNS services or freely call the private HTTP coordinator. FOSA therefore uses a short-lived HTTPS rendezvous only for browser pairing.
+JOIN v2 contient code/session/protocolVersion=2, clientKey et nonce de challenge. Challenge lié à la source, 30 s, usage unique, stockage borné. Le token membre aléatoire est privé ; Authorization: Bearer requis après join. Les v1 restent acceptés. Huit codes erronés par source/minute bloquent temporairement l’admission.
 
-The Android host does not poll the cloud during an ordinary native session. Opening MEMBERS → CODE / QR temporarily enables Web code pairing. During that window the host registers a hash of its six-digit code with a random host secret; the browser submits its compressed LAN-only SDP offer and the host posts the answer plus newly gathered LAN ICE candidates until the direct link opens. Requests expire quickly and are rate-limited. The rendezvous carries no audio and no ongoing FOSA control traffic.
+Six chiffres = identité de session et protection contre erreurs de sélection, pas secret fort. Le code annoncé ne protège pas d’un utilisateur du LAN. L’admission native HTTP suppose un LAN de confiance et n’est pas résistante à un attaquant actif sur ce réseau.
 
-After the answer is applied, the browser's encrypted WebRTC data channel becomes the coordinator RPC and Opus/SRTP audio remains peer-to-peer on the LAN. Loss of Internet after pairing does not route audio through Supabase. A normal Web repair performs an ICE restart while that data channel still exists; after a complete link loss or network-address change, the Web fallback may require re-pairing because browsers cannot rediscover the private coordinator by code alone.
+Poll : after, talk, target, level ; réponse session/sessionName/leader/members/signals. Signal : seq/from/generation/type/data, types offer/answer/ice/reset. La plus petite identité produit les offres pour éviter les collisions. Acquittement après application. Générations anciennes ignorées. Owner seul change groupes et canTalk/canListen. Les récepteurs conformes appliquent les permissions aux pistes.
 
-### Offline browser fallback
-When Internet is unavailable, the QR offer/answer exchange provides a fully local Web pairing path. Because a browser cannot enumerate Android mDNS services or derive a private host from a six-digit code, zero-Internet + code-only pairing is guaranteed only for native clients.
+## Identité/reprise
 
-## Security boundary
-The coordinator is HTTP on the private LAN; join codes and native tokens are not protected against a hostile LAN observer. Use a trusted dedicated network. Audio and browser RPC are encrypted; this release is not suitable for untrusted public networks. TLS/pinning, per-device admission and robust host failover remain P2. No login cloud is used.
+clientKey persisté avant join, resumeToken privé après join, session ID et generation. Un join répété avec preuve privée retrouve le membre, remet Talk à zéro, vide les signaux obsolètes et augmente la génération. Les noms/IP ne sont pas des identifiants. Les identités expirées quittent les huit emplacements actifs après 60 s ; jusqu’à 64 identités retirées sont reprenables pendant cette session. Leave explicite révoque l’identité. Une réponse HTTP join perdue ne doit pas créer un second membre grâce au clientKey conservé.
+
+Web local : HTTP de même origine pour bootstrap ; quand le lien direct est prêt, RPC dans le data channel chiffré. Si ce lien échoue, HTTP local reste disponible pour réparer/rejoindre ; aucun rendez-vous Internet. Après changement d’IP de l’hôte, les navigateurs ne redécouvrent pas les services natifs et doivent rouvrir le lien local.
+
+## Invitations courtes
+
+Session : fosa://join?v=2&s=UUID&c=123456&h=IP&p=PORT. Device : fosa://device?v=2&id=12HEX&n=32HEX. Maximum 150 caractères. Web QR : URL HTTPS seule. Aucun SDP/ICE/answer/certificat/token membre.
+
+Android DeviceInvitation : endpoint POST `/pair/accept`, nonce temporaire à usage unique, délai 90 s. L’hôte découvre le locator de l’appareil par NSD/UDP/P2P, puis lui transmet son locator de session.
+
+Web local : device-register → QR court → owner device-admit → device-poll → join avec jeton aléatoire à usage unique. Invitation 90 s ; 32 en attente maximum. Le navigateur n’annonce pas de serveur local.
+
+## Média
+
+WebRTC Opus, DTLS/SRTP, ICE servers vide. Candidats host locaux IPv4 privés/IPv6 privés/link-local/mDNS, UDP privilégié et TCP host accepté. Candidats relay/srflx et publics filtrés ; paire externe relay/srflx refusée. Média pair à pair, pas de cloud/HTTP/Supabase/TURN. Full mesh jusqu’à huit membres ; aucune migration d’hôte automatique livrée.
+
+Stats : paire sélectionnée, adresses/ports/types candidats, protocole, DTLS, codec, paquets RX/TX, RTT, jitter, perte. Mouth-to-ear UNKNOWN ; les statistiques RTC ne constituent pas une latence physique.
+
+Ancien rendez-vous/SDP compressé : méthodes conservées uniquement pour la compatibilité 0.12, absentes du parcours normal 0.13. Aucun changement Supabase requis pour les sessions locales.

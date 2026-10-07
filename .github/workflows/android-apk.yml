@@ -6,13 +6,17 @@ on:
       - 'native/android/**'
       - '.github/workflows/android-apk.yml'
       - '.github/scripts/android-verify.sh'
+      - 'mobile/**'
 permissions:
   contents: write
 concurrency:
   group: fosa-android-release
   cancel-in-progress: true
 jobs:
+  verify:
+    uses: ./.github/workflows/verify-audio.yml
   build:
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -24,6 +28,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Preserve Android debug signing identity for subsequent updates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: fosa-android-debug-signing-v1
       - name: Build debug APK
         working-directory: native/android
         run: gradle assembleDebug
@@ -56,7 +65,7 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.12.7
+          name: FOSA-Android-v0.13.0
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
@@ -65,7 +74,7 @@ jobs:
         run: |
           if gh release view android-latest >/dev/null 2>&1; then
             gh release upload android-latest FOSA-Android.apk --clobber
-            gh release edit android-latest --title "FOSA Android v0.12.7" --notes "FOSA Mobile 0.12.7: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing, explicit two-way ICE bootstrap, real ICE restart, and automatic Web fallback to 100% local QR when Internet rendezvous is unavailable." --latest
+            gh release edit android-latest --title "FOSA Android v0.13.0" --notes "FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host’s local certificate once. See docs/mobile/LOCAL-FIRST-REPORT.md." --latest
           else
-            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.7" --notes "FOSA Mobile 0.12.7: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing, explicit two-way ICE bootstrap, real ICE restart, and automatic Web fallback to 100% local QR when Internet rendezvous is unavailable." --latest
+            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.13.0" --notes "FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host’s local certificate once. See docs/mobile/LOCAL-FIRST-REPORT.md." --latest
           fi
