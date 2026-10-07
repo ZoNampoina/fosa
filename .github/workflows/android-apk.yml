@@ -19,8 +19,6 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      FOSA_DEBUG_KEYSTORE: ${{ runner.temp }}/fosa-debug-signing/debug.keystore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -33,10 +31,13 @@ jobs:
       - name: Preserve Android debug signing identity for subsequent updates
         uses: actions/cache@v4
         with:
-          path: ${{ env.FOSA_DEBUG_KEYSTORE }}
+          path: ${{ runner.temp }}/fosa-debug-signing/debug.keystore
           key: fosa-android-debug-signing-v2
       - name: Prepare the persistent debug signing key
+        env:
+          FOSA_DEBUG_KEYSTORE: ${{ runner.temp }}/fosa-debug-signing/debug.keystore
         run: |
+          echo "FOSA_DEBUG_KEYSTORE=$FOSA_DEBUG_KEYSTORE" >> "$GITHUB_ENV"
           if [ ! -s "$FOSA_DEBUG_KEYSTORE" ]; then
             mkdir -p "$(dirname "$FOSA_DEBUG_KEYSTORE")"
             keytool -genkeypair -keystore "$FOSA_DEBUG_KEYSTORE" -storetype JKS -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
