@@ -26,6 +26,7 @@ class MobileUiTest {
         shot("01-home");ui.onNodeWithTag("home-create").performClick();ui.onNodeWithText("Bring your band\ntogether.").assertIsDisplayed();shot("02-create");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-join").performScrollTo().performClick();ui.onNodeWithText("Enter the code.\nThat\'s all.").assertIsDisplayed();shot("03-join");ui.onNodeWithText("‹ BACK").performClick();ui.onNodeWithTag("home-create").performClick()
         ui.onNodeWithTag("submit-session").performScrollTo().performClick()
         ui.waitUntil(15000){MobileService.state.optBoolean("active")};ui.waitUntil(10000){MobileService.state.optBoolean("controlConnected")}
+        assertFalse("Native host must stay LAN-only until Web pairing is explicitly requested",MobileService.state.optBoolean("webPairing"))
         peer=NativePeerFixture(ctx,MobileService.state)
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.let{a->(0 until a.length()).any{a.getJSONObject(it).optBoolean("connected")}}==true}
         shot("04-talk");ui.onNodeWithTag("nav-MEMBERS").performClick();shot("05-members");ui.onNodeWithText("MUTE").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithTag("nav-STATUS").performClick();ui.onNodeWithTag("nav-MEMBERS").performClick();ui.onNodeWithText("UNMUTE").assertExists();ui.onNodeWithText("UNMUTE").performClick();ui.onNodeWithTag("nav-STATUS").performClick();shot("06-status");assertTrue(MobileService.state.isNull("latency"))
