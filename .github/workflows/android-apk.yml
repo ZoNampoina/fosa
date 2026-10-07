@@ -56,7 +56,7 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.12.6
+          name: FOSA-Android-v0.12.7
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
@@ -65,7 +65,7 @@ jobs:
         run: |
           if gh release view android-latest >/dev/null 2>&1; then
             gh release upload android-latest FOSA-Android.apk --clobber
-            gh release edit android-latest --title "FOSA Android v0.12.6" --notes "FOSA Mobile 0.12.6: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing fallback, explicit two-way ICE bootstrap, real ICE restart, and Web code pairing limited to an explicit host window." --latest
+            gh release edit android-latest --title "FOSA Android v0.12.7" --notes "FOSA Mobile 0.12.7: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing, explicit two-way ICE bootstrap, real ICE restart, and automatic Web fallback to 100% local QR when Internet rendezvous is unavailable." --latest
           else
-            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.6" --notes "FOSA Mobile 0.12.6: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing fallback, explicit two-way ICE bootstrap, real ICE restart, and Web code pairing limited to an explicit host window." --latest
+            gh release create android-latest FOSA-Android.apk --title "FOSA Android v0.12.7" --notes "FOSA Mobile 0.12.7: audited LAN-first intercom with bidirectional Opus, User/Group/Leader/All talk routing, selective listening, fixed-port hotspot pairing, explicit two-way ICE bootstrap, real ICE restart, and automatic Web fallback to 100% local QR when Internet rendezvous is unavailable." --latest
           fi
