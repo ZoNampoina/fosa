@@ -107,7 +107,7 @@ class MobileService:Service() {
         http?.close();https?.close();https=null
         // Listening servers must accept either local interface. Do not mark
         // their sockets with the unrelated infrastructure Wi-Fi network.
-        val cm=getSystemService(ConnectivityManager::class.java);val previous=ConnectivityManager.getBoundNetworkForProcess();cm.bindProcessToNetwork(null)
+        val cm=getSystemService(ConnectivityManager::class.java);val previous=cm.boundNetworkForProcess;cm.bindProcessToNetwork(null)
         servedAddresses=LanAddress.ips().toSet()
         try{
         tls=try{LanTls(this,LanAddress.ips())}catch(e:Exception){webError="Web sécurisé indisponible : ${e.javaClass.simpleName}";null}
