@@ -25,6 +25,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Volatile var talking=false;private set
     @Volatile var talkRequested=false;private set
     @Volatile var target="all"
+    @Volatile var listenTarget="all";private set
     @Volatile var muted=false;private set
     @Volatile var level:Double?=null;private set
     @Volatile var master=0.75;private set
@@ -82,7 +83,10 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     @Synchronized fun panic(active:Boolean){muted=active;adm.setSpeakerMute(active);if(active)talkRequested=false;refreshTalk()}
     @Synchronized fun volume(value:Double){master=if(value.isFinite())value.coerceIn(0.0,1.0) else 0.0;links.values.forEach{it.received?.setVolume(master)}}
     fun mutedMembers():List<String> = memberMutes.filter{it.value}.keys.toList()
-    @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;links[id]?.received?.setEnabled(!active)}
+    private fun listenEligible(id:String):Boolean {val m=roster.find{it.optString("id")==id};return listenTarget=="all"||listenTarget=="user:$id"||listenTarget=="leader"&&m?.optBoolean("leader")==true||listenTarget.startsWith("group:")&&m?.optString("group")==listenTarget.removePrefix("group:")}
+    @Synchronized private fun applyListen(){links.forEach{(id,l)->l.received?.setEnabled(memberMutes[id]!=true&&listenEligible(id))};changed()}
+    @Synchronized fun listen(value:String){listenTarget=value;applyListen()}
+    @Synchronized fun memberMute(id:String,active:Boolean){memberMutes[id]=active;applyListen()}
     @Synchronized fun sync(members:List<JSONObject>) {
         roster=members
         val live=members.filter{it.optString("id")!=self&&it.optBoolean("online")}.map{it.getString("id")}.toSet()
@@ -90,7 +94,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         live.forEach{id->val generation=members.first{it.optString("id")==id}.optInt("generation",1)
             if(links[id]?.generation?.let{it!=generation}==true)remove(id)
             if(!links.containsKey(id)){make(id).generation=generation;if(self<id)offer(id)}}
-        refreshTalk()
+        refreshTalk();applyListen()
     }
     /** A fresh manual offer replaces the old transport before poll sees its epoch. */
     @Synchronized fun preparePair(id:String,generation:Int){push(false);remove(id);make(id).generation=generation}
@@ -113,7 +117,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             override fun onRemoveStream(s:MediaStream){}
             override fun onDataChannel(c:DataChannel){if(observed!=null&&links[id]===observed)wire(id,c)}
             override fun onRenegotiationNeeded(){}
-            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){if(observed!=null&&links[id]===observed)(r.track() as? AudioTrack)?.let{observed?.received=it;it.setVolume(master);it.setEnabled(memberMutes[id]!=true)}}
+            override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){if(observed!=null&&links[id]===observed)(r.track() as? AudioTrack)?.let{observed?.received=it;it.setVolume(master);it.setEnabled(memberMutes[id]!=true&&listenEligible(id))}}
         }) ?: error("Audio WebRTC indisponible")
         val track=source?.let{factory.createAudioTrack("mic-$id",it).also{t->t.setEnabled(false);pc.addTrack(t,listOf("fosa"))}}
         if(track==null)pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
