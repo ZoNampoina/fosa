@@ -27,6 +27,7 @@ class MobileService:Service() {
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var https:LanHttp?=null;private var rtc:RtcMobile?=null
     private var tls:LanTls?=null;private var webError="";private var connectionPhase=ConnectionPhase.DISCOVERING;private var reconnectCount=0
+    private var servedAddresses=emptySet<String>()
     private var joiningCode="";private var lastReconnectAttempt=0L
     private val connection by lazy{FosaConnectionManager(this){p,_,message->connectionPhase=p;if(message.isNotBlank())error=message;publish()}}
     private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L;private var repairDue=0L
@@ -104,10 +105,16 @@ class MobileService:Service() {
     private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
     private fun startLocalServers(){
         http?.close();https?.close();https=null
+        // Listening servers must accept either local interface. Do not mark
+        // their sockets with the unrelated infrastructure Wi-Fi network.
+        val cm=getSystemService(ConnectivityManager::class.java);val previous=ConnectivityManager.getBoundNetworkForProcess();cm.bindProcessToNetwork(null)
+        servedAddresses=LanAddress.ips().toSet()
+        try{
         tls=try{LanTls(this,LanAddress.ips())}catch(e:Exception){webError="Web sécurisé indisponible : ${e.javaClass.simpleName}";null}
         http=try{LanHttp("0.0.0.0",room!!,preferredLanPort,this,tls?.ca)}catch(_:Exception){LanHttp("0.0.0.0",room!!,0,this,tls?.ca)}
         address="http://$networkIp:${http!!.port}"
         tls?.let{try{https=LanHttp("0.0.0.0",room!!,48766,this,it.ca,it.factory);webError=""}catch(_:Exception){webError="Port Web sécurisé occupé"}}
+        }finally{cm.bindProcessToNetwork(previous)}
     }
     private fun request(path:String,b:JSONObject,token:String="")=connection.request(address,path,b,token)
     private fun call(path:String,b:JSONObject)=room?.call(path,b,profile.optString("token")) ?: request(path,b,profile.optString("token"))
@@ -183,6 +190,7 @@ class MobileService:Service() {
         val ip=LanAddress.ip(this)
         if(ip==null){engine.push(false);connectionPhase=ConnectionPhase.RECONNECTING;phase="Réseau perdu · reconnexion";publish();recoverConnection();return}
         if(ip!=networkIp){engine.push(false);engine.reset();networkIp=ip;if(room==null)connection.bind(address) else getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(LanAddress.wifi(this));if(room!=null){startLocalServers();advertise()}}
+        if(room!=null&&LanAddress.ips().toSet()!=servedAddresses){startLocalServers();advertise()}
         session=call("poll",JSONObject().put("after",ack).put("talk",engine.talking).put("target",engine.target).put("level",if(engine.talking)engine.level else JSONObject.NULL))
         lastPoll=SystemClock.elapsedRealtime();error="";phase="Session connectée";connectionPhase=if(engine.links.values.any{it.connected})ConnectionPhase.CONNECTED else ConnectionPhase.NEGOTIATING_AUDIO
         val members=session.getJSONArray("members");val list=(0 until members.length()).map{members.getJSONObject(it)}
@@ -242,9 +250,10 @@ class MobileService:Service() {
         val u=PairingQr.parse(qr);require(u.host=="device"){"Scanne le QR de l’appareil invité"}
         try{host.call("device-admit",JSONObject().put("id",u.getQueryParameter("id")).put("nonce",u.getQueryParameter("n")),profile.getString("token"));error="";publish();return@enqueue}catch(_:IllegalArgumentException){}
         val device=connection.findDevice(u.getQueryParameter("id")!!)
-        val ip=LanAddress.ip(this) ?: throw IllegalArgumentException("Réseau local indisponible")
-        networkIp=ip;address="http://$ip:${http!!.port}"
-        connection.request(device.address,"/pair/accept",JSONObject().put("id",u.getQueryParameter("id")).put("nonce",u.getQueryParameter("n")).put("join",PairingQr.session(host.id,host.code,address)))
+        val ip=LanAddress.sourceForPeer(Uri.parse(device.address).host.orEmpty()) ?: throw IllegalArgumentException("Appareil hors du réseau local")
+        if(LanAddress.ips().toSet()!=servedAddresses){startLocalServers();advertise()}
+        val reachable="http://$ip:${http!!.port}"
+        connection.request(device.address,"/pair/accept",JSONObject().put("id",u.getQueryParameter("id")).put("nonce",u.getQueryParameter("n")).put("join",PairingQr.session(host.id,host.code,reachable)))
         error="";publish()
     }catch(e:Exception){error=e.message ?: "Appareil inaccessible";publish()}}}
     fun createLocalNetwork(){
