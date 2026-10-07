@@ -70,7 +70,7 @@ class MobileActivity:ComponentActivity(){
         joiningManager?.close();joiningManager=FosaConnectionManager(this){_,_,message->if(message.isNotBlank())runOnUiThread{modeError=message}}
         joiningManager!!.nearby{items->runOnUiThread{nearby=items}}
     };if(ask)networkPermission(start)else start()}
-    private fun launch(host:Boolean){if(LanAddress.ip(this)!=null)performLaunch(host) else networkPermission{performLaunch(host)}}
+    private fun launch(host:Boolean){networkPermission{performLaunch(host)}}
     private fun performLaunch(host:Boolean){joiningManager?.close();joiningManager=null;deviceInvite?.close();deviceInvite=null;getSharedPreferences("mobile-ui",MODE_PRIVATE).edit().putString("name",name).putString("role",role).apply();modeError="";AudioModeSwitch.toMobile(this,{
         startForegroundService(Intent(this,MobileService::class.java).setAction("START").putExtra("host",host).putExtra("name",name).putExtra("role",role).putExtra("session",sessionName).putExtra("address",address).putExtra("code",code).putExtra("sessionId",joiningSession));tab="TALK"
     },{modeError=it})}
