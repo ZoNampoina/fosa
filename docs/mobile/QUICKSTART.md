@@ -1,4 +1,4 @@
-# FOSA Mobile 0.12.6 — LAN-first audited flow
+# FOSA Mobile 0.12.7 — LAN-first audited flow
 
 **Android**
 1. Install the APK. Open FOSA → Create Session. Enable microphone.
@@ -11,7 +11,7 @@
 1. Open https://zonampoina.github.io/fosa/mobile/ once with Internet and cache the app.
 2. On the Android host, open MEMBERS → CODE / QR. This temporarily opens Web code pairing; ordinary native sessions stay LAN-only and do not poll the cloud.
 3. Web client: Join Session → name/role/code → JOIN WITH CODE. Internet is used only for this short offer/answer + ICE bootstrap; audio and control then stay direct on the LAN.
-4. For zero-Internet Web pairing, choose 100% LOCAL · OFFLINE QR. Browsers cannot discover the Android host from six digits alone, so QR is the fully local Web fallback.
+4. For zero-Internet Web pairing, FOSA now switches automatically to 100% LOCAL · OFFLINE QR when the rendezvous cannot be reached. You can also choose it manually. Browsers cannot discover the Android host from six digits alone, so QR remains the fully local Web fallback.
 5. RECONNECT AUDIO performs a true ICE restart while the direct control channel survives. After a complete WebRTC/network-address loss, re-pair by code or local QR.
 
 **MR18 / PC**
