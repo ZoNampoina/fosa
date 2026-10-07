@@ -17,6 +17,13 @@ import javax.net.ssl.*
 @RunWith(AndroidJUnit4::class)
 class LocalPairingTest {
     private val ctx get()=InstrumentationRegistry.getInstrumentation().targetContext
+    @Test fun localInterfaceSelectionNeverUsesDefaultWifiForUnrelatedPeer(){
+        assertNull("A Wi-Fi default route cannot be used for a P2P or public peer",LanAddress.forHost(ctx,"8.8.8.8"))
+        assertNull(LanAddress.sourceForPeer("127.0.0.1"))
+        val local=LanAddress.ip(ctx)
+        assertNotNull("Emulator must provide its real private interface",local)
+        assertEquals(local,LanAddress.sourceForPeer(local!!))
+    }
     private fun post(origin:String,path:String,q:JSONObject=JSONObject(),token:String=""):JSONObject{val c=URL("$origin/lan/$path").openConnection() as HttpURLConnection;c.requestMethod="POST";c.doOutput=true;c.readTimeout=3000;if(token.isNotBlank())c.setRequestProperty("Authorization","Bearer $token");try{c.outputStream.use{it.write(q.toString().toByteArray())};return JSONObject(c.inputStream.bufferedReader().use{it.readText()})}finally{c.disconnect()}}
     @Test fun realHttpChallengeResumePermissionsAndNoTokenInRoster(){
         val room=LanSession("BAND LIVE","ZO","HOST");val server=LanHttp("127.0.0.1",room)
