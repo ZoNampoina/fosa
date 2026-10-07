@@ -40,4 +40,4 @@ WebRTC Opus, DTLS/SRTP, ICE servers vide. Candidats host locaux IPv4 privés/IPv
 
 Stats : paire sélectionnée, adresses/ports/types candidats, protocole, DTLS, codec, paquets RX/TX, RTT, jitter, perte. Mouth-to-ear UNKNOWN ; les statistiques RTC ne constituent pas une latence physique.
 
-Ancien rendez-vous/SDP compressé : méthodes conservées uniquement pour la compatibilité 0.12, absentes du parcours normal 0.13. Aucun changement Supabase requis pour les sessions locales.
+Ancien rendez-vous : le code-only de GitHub Pages reste disponible lorsque l'hôte active explicitement ENABLE INTERNET DISCOVERY · 2 MIN dans Advanced Diagnostics. Ce bootstrap est limité à l'origine HTTPS GitHub Pages ; le Web local ne l'appelle pas. Audio et contrôle sont directs après le pairing. Le SDP compressé/QR aller-retour n'est visible que dans le test de compatibilité 0.12, jamais dans le parcours normal 0.13. Aucun changement Supabase requis pour les sessions locales.

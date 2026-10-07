@@ -8,6 +8,8 @@
 4. Attendre CONNECTED et SRTP CONNECTED, puis tester TALK dans les deux sens avec des écouteurs filaires.
 5. Members : User/Group, autorisations parole/écoute et ajout d’appareils. Internet peut être coupé dès avant la première étape.
 
+Au démarrage, la permission Nearby prépare aussi le repli automatique Wi-Fi Direct ; son refus laisse le LAN disponible. Les APK sont signés avec une clé debug désormais conservée par la CI. Une ancienne installation 0.12.x peut avoir une autre signature : si Android refuse la mise à jour, une réinstallation effacera son identité. Préparer cette migration avant la répétition, jamais pendant une session.
+
 ## Sans routeur
 
 Wi-Fi doit être activé. Sans LAN, FOSA tente Wi-Fi Direct natif. Accorder Nearby devices sur Android 13+ ou localisation sur Android 12 et antérieurs. Android peut afficher son propre consentement de connexion. FOSA pilote les APIs P2P ; aucun réglage Wi-Fi Direct manuel n’est demandé par l’app.
@@ -27,6 +29,8 @@ Invité : JOIN → DISPLAY PAIRING QR, laisser l’écran ouvert. Hôte : Member
 5. OFFLINE PACKAGE vérifie le cache PWA. Les assets sont fournis par l’Android même si GitHub/DNS/Internet sont inaccessibles. Un cache d’interface n’est pas un serveur : l’hôte doit rester disponible pour une nouvelle session.
 
 Le HTTP d’une IP privée charge l’interface mais ne fournit pas getUserMedia/service worker dans les navigateurs standards. Ne pas attendre de talkback complet depuis ce lien non sécurisé. Un simple avertissement TLS ignoré peut ne pas suffire : installer la confiance, ou utiliser l’APK Android. Garder la page Web ouverte ; arrière-plan Web non garanti.
+
+GitHub Pages reste facultatif. Pour conserver son entrée par six chiffres lorsqu'Internet existe, l'hôte peut activer ENABLE INTERNET DISCOVERY · 2 MIN dans Advanced Diagnostics. Le rendez-vous échange seulement la signalisation initiale ; audio et commandes deviennent directs. Sans Internet, utiliser WEB ACCESS sur l'hôte. Le Web local n'appelle jamais ce rendez-vous.
 
 ## Reconnexion et diagnostic
 

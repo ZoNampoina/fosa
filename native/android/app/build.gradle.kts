@@ -7,6 +7,11 @@ android {
     namespace = "com.arizona.fosa"
     compileSdk = 35
     defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "0.13.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    System.getenv("FOSA_DEBUG_KEYSTORE")?.let { path ->
+        signingConfigs.getByName("debug").apply {
+            storeFile = file(path); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"
+        }
+    }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/fosa-web-assets"))
     packaging { resources.excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF" }
 }
