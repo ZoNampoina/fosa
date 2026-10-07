@@ -47,7 +47,7 @@ class MobileService:Service() {
     override fun onStartCommand(i:Intent?,flags:Int,id:Int):Int {
         when(i?.action){
             "START"->{ foreground();enqueue{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }
-            "TALK"->push(!(rtc?.talking ?: false),5000)
+            "TALK"->push(!(rtc?.talkRequested ?: false),5000)
             "MUTE"->panic(!(rtc?.muted ?: false))
             "STOP"->stopSelf()
         }
