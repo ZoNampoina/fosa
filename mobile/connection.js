@@ -1,6 +1,7 @@
 /* Discovery/authentication are independent of media. Browsers use the local
  * host origin; native adapters own DNS-SD and creation of Wi-Fi Direct groups. */
 export const PHASES=Object.freeze(['DISCOVERING','FOUND','AUTHENTICATING','CONNECTING_NETWORK','SIGNALING','NEGOTIATING_AUDIO','CONNECTED','RECONNECTING','FAILED']);
+export function discoveryMode(origin=location.origin){const u=new URL(origin);return u.protocol==='https:'&&u.hostname==='zonampoina.github.io'?'CLOUD_RENDEZVOUS':'LAN';}
 export function sessionLocator(value){if(String(value).length>150)throw Error('Scanne le QR court de FOSA 0.13');const u=new URL(value);if(u.protocol!=='fosa:'||u.hostname!=='join'||u.searchParams.get('v')!=='2')throw Error('QR de session FOSA invalide');const code=u.searchParams.get('c'),host=u.searchParams.get('h'),session=u.searchParams.get('s');if(!/^[0-9]{6}$/.test(code)||!privateHost(host)||!/^[a-f0-9-]{6,40}$/i.test(session||''))throw Error('QR local invalide');return {code,session,origin:`https://${host}:48766`};}
 export function privateHost(value){const n=String(value||'').split('.').map(x=>/^\d{1,3}$/.test(x)?Number(x):NaN);return n.length===4&&n.every(x=>Number.isInteger(x)&&x>=0&&x<=255)&&(n[0]===10||n[0]===192&&n[1]===168||n[0]===172&&n[1]>=16&&n[1]<=31);}
 export class FosaWebConnectionManager {
