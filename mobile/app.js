@@ -29,7 +29,7 @@ function destination(type){const options=type==='USER'?client.members.filter(m=>
 
 const RENDEZVOUS="https://kgrrxhmzteefmdbgdbaf.supabase.co/functions/v1/pair-rendezvous",RENDEZVOUS_KEY="sb_publishable_xWl3rWRXfTrL9WGERJmkHQ_Gnjz8bv3";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function rendezvous(action,body={},timeout=3000){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),timeout);try{const r=await fetch(RENDEZVOUS,{method:"POST",headers:{"content-type":"application/json",apikey:RENDEZVOUS_KEY},body:JSON.stringify({action,...body}),cache:"no-store",signal:ctrl.signal});const q=await r.json().catch(()=>({error:"Réponse rendez-vous illisible"}));if(!r.ok||q.error)throw Error(q.error||"Rendez-vous indisponible");return q;}catch(e){if(e?.name==="AbortError"||e instanceof TypeError)throw Error("RENDEZVOUS_OFFLINE");throw e;}finally{clearTimeout(timer);}}
+async function rendezvous(action,body={},timeout=6000){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),timeout);try{const r=await fetch(RENDEZVOUS,{method:"POST",headers:{"content-type":"application/json",apikey:RENDEZVOUS_KEY},body:JSON.stringify({action,...body}),cache:"no-store",signal:ctrl.signal});const q=await r.json().catch(()=>({error:"Réponse rendez-vous illisible"}));if(!r.ok||q.error)throw Error(q.error||"Rendez-vous indisponible");return q;}catch(e){if(e?.name==="AbortError"||e instanceof TypeError)throw Error("RENDEZVOUS_OFFLINE");throw e;}finally{clearTimeout(timer);}}
 async function pairByCode(values){
   if(globalThis.FOSA_DISABLE_RENDEZVOUS===true||navigator.onLine===false)return showOfflineInvite(values,"Internet indisponible : passage automatique en appairage 100 % local.");
   let started=null,lastStartError=null;
