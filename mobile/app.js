@@ -6,7 +6,7 @@ const label=s=>`<span class="label">${s}</span>`,panel=s=>`<section class="panel
 let tab='HOME',rendered='',scanner=null,live=localStorage.getItem('fosa-performance')==='1';
 const client=new WebLanClient(()=>{draw();update();});window.fosaMobile=client;
 let diagnosticTimer;
-const modes=()=>`<div class="row full">${['HOLD','TAP','AUTO'].map(m=>button('mode-'+m,m,client.talkControl.mode!==m)).join('')}</div>`;
+const modes=()=>`<div class="row full talk-modes">${['HOLD','TAP','AUTO'].map(m=>button('mode-'+m,m,client.talkControl.mode!==m)).join('')}</div>`;
 function bindModes(){for(const m of ['HOLD','TAP','AUTO'])bind('mode-'+m,()=>{client.setMode(m);draw(true);});}
 const content=$('#content'),sheet=$('#sheet');sheet.querySelector('.close').onclick=()=>{scanner?.stop();sheet.close();};sheet.addEventListener('close',()=>{clearInterval(diagnosticTimer);scanner?.stop();if(!client.profile&&client.offer)client.close();});
 function bind(id,fn){const e=$('#'+id);if(e)e.onclick=fn;}
