@@ -63,6 +63,7 @@ class MobileEngineTest {
             a.mode("TAP");a.push(true);assertTrue(a.talkControl.armed);a.panic(true);a.panic(false);assertFalse(a.talkControl.armed);assertFalse(a.talkRequested)
             a.push(true);members[0].put("canTalk",false);a.sync(members);members[0].put("canTalk",true);a.sync(members);assertFalse("Permission restoration cannot reopen TAP",a.talkControl.armed)
             assertTrue(a.links.getValue("b").stats.optLong("bytesSent")>0);assertTrue(b.links.getValue("a").stats.optLong("bytesReceived")>0)
+            android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_PCM a=${a.diagnostics()} stats=${a.links.getValue("b").stats} b=${b.diagnostics()} stats=${b.links.getValue("a").stats}")
         }finally{a.close();b.close()}
     }
     @Test fun coordinatorAuthenticationGroupsUnicodeAndBoundaries(){
@@ -125,7 +126,7 @@ class MobileEngineTest {
             a.sync(members);b.sync(members);await("Direct LAN native ICE must connect and activate held PTT"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true&&a.talking}
             assertTrue("Held PTT must enable the sender as soon as ICE connects",a.links.getValue("b").track!!.enabled());a.push(false)
             val listeningPc=b.links.getValue("a").pc;assertNull(b.links.getValue("a").track)
-            b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
+            b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.sendReady==true&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
             assertSame(listeningPc,b.links.getValue("a").pc);b.push(true,"user:a");assertTrue(b.links.getValue("a").track!!.enabled());b.push(false)
             b.push(true,"leader");assertTrue("A member must be able to target the session leader",b.links.getValue("a").track!!.enabled());b.push(false)
             assertNotNull("Receiving track must exist before listen filtering",b.links.getValue("a").received)

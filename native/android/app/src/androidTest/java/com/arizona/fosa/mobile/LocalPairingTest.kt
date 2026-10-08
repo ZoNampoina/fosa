@@ -47,7 +47,7 @@ class LocalPairingTest {
         try{room.call("device-admit",admit,room.ticket(room.owner).getString("token"));fail("Second scan must not admit again")}catch(_:IllegalArgumentException){}
     }
     @Test fun realWifiQrEscapingAndSessionSeparation(){
-        val ssid="FOSA; Local: \"Band\",\\",password="a;:b,\\c\"12345"
+        val ssid="FOSA; Local: \"Band\",\\";val password="a;:b,\\c\"12345"
         val payload=WifiQr.encode(ssid,password)
         val matrix=QRCodeWriter().encode(payload,BarcodeFormat.QR_CODE,384,384);val pixels=IntArray(384*384){i->if(matrix[i%384,i/384])android.graphics.Color.BLACK else android.graphics.Color.WHITE}
         val decoded=QRCodeReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(384,384,pixels))))

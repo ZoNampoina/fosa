@@ -48,7 +48,7 @@ class HybridAudioTest {
             await("Native encoder must reach production Web decoded PCM and RTP energy"){js("fosaMobile.measureMic();[...fosaMobile.links.values()].some(l=>l.receiveLevel>-65 && l.metrics.bytesReceived>0 && l.metrics.totalAudioEnergy>0)")=="true"}
             await("Short explicit test must finish without rearming TAP"){js("!fosaMobile.testTone && !fosaMobile.talkControl.armed && !fosaMobile.talkRequested")=="true"&&!engine.testing}
             assertEquals(2,room.call("poll",JSONObject(),token).getJSONArray("members").length())
-            println("FOSA_HYBRID_PCM ${engine.diagnostics()} WEB ${js("JSON.stringify(fosaMobile.diagnostics())")}")
+            android.util.Log.i("FOSA_AUDIO_QA","FOSA_HYBRID_PCM ${engine.diagnostics()} WEB ${js("JSON.stringify(fosaMobile.diagnostics())")}")
         }finally{worker.shutdownNow();instrumentation.runOnMainSync{web?.let{it.loadUrl("about:blank");it.destroy()}};scenario.close();engine.close();server.close()}
     }
 }

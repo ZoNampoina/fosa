@@ -57,6 +57,7 @@ class MobileUiTest {
         ui.waitUntil(4000){MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed")}
         ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);Thread.sleep(32000)
         assertTrue("Native TAP must survive activity background and HOLD safety time",MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed"))
+        android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_TAP_BACKGROUND ${MobileService.state.optJSONObject("audioDiagnostics")}")
         ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);ui.onNodeWithTag("talk-button").performScrollTo().performClick();ui.waitUntil(1500){!MobileService.state.optBoolean("talkArmed")}
         ui.onNodeWithTag("mode-HOLD").performScrollTo().performClick()
         val peerId=peer!!.id;peer!!.reconnect()

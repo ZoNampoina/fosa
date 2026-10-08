@@ -13,6 +13,7 @@ splash_test_result=$?
 
 mkdir -p app/build/reports/androidTests/diagnostics
 adb logcat -d -v threadtime > app/build/reports/androidTests/diagnostics/logcat.txt
+rg 'FOSA_(HYBRID_PCM|NATIVE_PCM|NATIVE_TAP_BACKGROUND)' app/build/reports/androidTests/diagnostics/logcat.txt || true
 printf 'functional_tests=%s\nsplash_visual_test=%s\n' "$fosa_test_result" "$splash_test_result" > app/build/reports/androidTests/diagnostics/summary.txt
 if [ "$fosa_test_result" -ne 0 ]; then
   adb shell dumpsys activity lastanr > app/build/reports/androidTests/diagnostics/last-anr.txt

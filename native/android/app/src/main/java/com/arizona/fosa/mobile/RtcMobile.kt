@@ -17,7 +17,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private val signal:(String,String,JSONObject)->Unit,
     private val changed:()->Unit,
     private val rpc:(String,JSONObject)->JSONObject, private val noiseReduction:Boolean=true) {
-    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),val localIce:java.util.concurrent.CopyOnWriteArrayList<IceCandidate> = java.util.concurrent.CopyOnWriteArrayList(),var connected:Boolean=false,var iceState:String="NEW",var localCandidates:Int=0,var remoteCandidates:Int=0,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null,var makingOffer:Boolean=false,var ignoreOffer:Boolean=false,var renegotiate:Boolean=false,var offerEpoch:Int=0)
+    data class Link(val pc:PeerConnection,var track:AudioTrack?,var generation:Int=1,var channel:DataChannel?=null,var remote:Boolean=false,val pending:MutableList<IceCandidate> = mutableListOf(),val localIce:java.util.concurrent.CopyOnWriteArrayList<IceCandidate> = java.util.concurrent.CopyOnWriteArrayList(),var connected:Boolean=false,var iceState:String="NEW",var localCandidates:Int=0,var remoteCandidates:Int=0,var stats:JSONObject=JSONObject(),var received:AudioTrack?=null,var makingOffer:Boolean=false,var ignoreOffer:Boolean=false,var renegotiate:Boolean=false,var offerEpoch:Int=0,var sendReady:Boolean=false)
     val links=ConcurrentHashMap<String,Link>()
     @Volatile var error="";private set
     @Volatile var playing=false;private set
@@ -91,7 +91,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             .setUseHardwareAcousticEchoCanceler(JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
             .setUseHardwareNoiseSuppressor(noiseReduction&&JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
             .setSamplesReadyCallback { a ->
-                val db=rms(a.data);val test=testing
+                val db=rms(a.data);val test=testing;if(!test&&(error.startsWith("Microphone")||error.startsWith("Capture")))error=""
                 if(test)testSignalFrames+=a.data.size/2 else {captureAt=android.os.SystemClock.elapsedRealtime();captureFrames+=a.data.size/2;if(db>-90)captureNonZeroFrames+=a.data.size/2}
                 val now=System.nanoTime();if(now-sampleTime>100000000L){sampleTime=now;if(!test)level=db;defer{if(!test)talkControl.level(db,android.os.SystemClock.elapsedRealtime());heartbeat()}}
             }.createAudioDeviceModule()
@@ -108,7 +108,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     fun microphoneReady():Boolean=source!=null
     @Synchronized private fun refreshTalk(){
         if(roster.find{it.optString("id")==self}?.optBoolean("canTalk",true)==false){talkControl.stop();stopTest();talkRequested=false}
-        talking=talkRequested&&!muted&&source!=null&&roster.find{it.optString("id")==self}?.optBoolean("canTalk",true)!=false&&links.any{it.value.connected&&eligible(it.key)}
+        talking=talkRequested&&!muted&&source!=null&&roster.find{it.optString("id")==self}?.optBoolean("canTalk",true)!=false&&links.any{it.value.connected&&it.value.sendReady&&eligible(it.key)}
         links.forEach{(id,l)->l.track?.setEnabled(talking&&eligible(id))}
         changed()
     }
@@ -167,10 +167,11 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private fun send(c:DataChannel,j:JSONObject){if(c.state()==DataChannel.State.OPEN)c.send(DataChannel.Buffer(ByteBuffer.wrap(j.toString().toByteArray()),false))}
     private fun observer(created:((SessionDescription)->Unit)?=null,done:(()->Unit)?=null,failed:((String)->Unit)?=null)=object:SdpObserver {
         override fun onCreateSuccess(s:SessionDescription){defer{created?.invoke(s)}}
-        override fun onSetSuccess(){defer{done?.invoke()}}
+        override fun onSetSuccess(){defer{updateNegotiatedSend();if(error.startsWith("Audio SDP"))error="";done?.invoke();refreshTalk()}}
         override fun onCreateFailure(s:String){defer{error="Audio SDP creation: $s";failed?.invoke(s);changed()}}
         override fun onSetFailure(s:String){defer{error="Audio SDP negotiation: $s";failed?.invoke(s);changed()}}
     }
+    @Synchronized private fun updateNegotiatedSend(){links.values.forEach{l->l.sendReady=l.track!=null&&l.pc.transceivers.any{t->t.sender.track()?.id()==l.track?.id()&&t.currentDirection in listOf(RtpTransceiver.RtpTransceiverDirection.SEND_RECV,RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)}}}
     private fun publish(id:String,type:String,s:SessionDescription,epoch:Int?=null){val l=links[id]?:return
         if(epoch!=null&&epoch!=l.offerEpoch)return
         l.pc.setLocalDescription(observer(done={if(links[id]===l){l.makingOffer=false;signal(id,type,JSONObject().put("sdp",LanAddress.localSdp(context,s.description)).put("type",type));if(type=="answer"&&l.renegotiate){l.renegotiate=false;offer(id)}}},failed={l.makingOffer=false}),s)
@@ -207,9 +208,9 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         if(s.type=="codec")m["mimeType"]?.let{out.put("codec",it)}
         if(s.type=="outbound-rtp"&&m["kind"]=="audio"){for(k in listOf("packetsSent","bytesSent"))(m[k] as? Number)?.let{out.put(k,it.toLong())}}
         if(s.type=="inbound-rtp"&&m["kind"]=="audio"){for(k in listOf("bytesReceived","totalAudioEnergy","totalSamplesReceived","totalSamplesDuration","audioLevel"))(m[k] as? Number)?.let{out.put(k,it)};(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
-    };out.put("txPacketsDelta",max(0L,out.optLong("packetsSent")-l.stats.optLong("packetsSent"))).put("rxPacketsDelta",max(0L,out.optLong("packetsReceived")-l.stats.optLong("packetsReceived"))).put("signalingState",l.pc.signalingState().name).put("senderEnabled",l.track?.enabled() ?: false);l.stats=out;changed() }}}
+    };out.put("txPacketsDelta",max(0L,out.optLong("packetsSent")-l.stats.optLong("packetsSent"))).put("rxPacketsDelta",max(0L,out.optLong("packetsReceived")-l.stats.optLong("packetsReceived"))).put("signalingState",l.pc.signalingState().name).put("negotiatedSender",l.sendReady).put("senderEnabled",l.track?.enabled() ?: false);l.stats=out;changed() }}}
     @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
     @Synchronized fun reset(){talkControl.stop();stopTest();talkRequested=false;talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
-    @Synchronized private fun remove(id:String){links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
+    @Synchronized private fun remove(id:String){if(talkControl.mode!="HOLD"){talkControl.stop();stopTest();talkRequested=false};links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
     @Synchronized fun close(){if(closed)return;closed=true;callbacks.removeCallbacksAndMessages(null);reset();source?.dispose();factory.dispose();adm.release()}
 }
