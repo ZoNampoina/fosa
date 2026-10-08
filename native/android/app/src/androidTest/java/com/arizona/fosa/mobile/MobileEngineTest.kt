@@ -13,6 +13,29 @@ import java.util.concurrent.ConcurrentLinkedQueue
 @RunWith(AndroidJUnit4::class)
 class MobileEngineTest {
     private fun await(label:String,check:()->Boolean){val deadline=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<deadline){if(check())return;Thread.sleep(30)};fail(label)}
+    @Test fun simultaneousMicrophonePermissionUpgradeKeepsAudioNegotiated(){
+        val ctx=InstrumentationRegistry.getInstrumentation().targetContext
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
+        val queue=ConcurrentLinkedQueue<Triple<String,String,JSONObject>>()
+        val a=RtcMobile(ctx,"a",false,{_,t,d->queue.add(Triple("b",t,d))},{},{_,_->JSONObject()})
+        val b=RtcMobile(ctx,"b",false,{_,t,d->queue.add(Triple("a",t,d))},{},{_,_->JSONObject()})
+        fun drain(){while(true){val q=queue.poll()?:break;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        val members=listOf(JSONObject().put("id","a").put("online",true),JSONObject().put("id","b").put("online",true))
+        try{
+            a.sync(members);b.sync(members)
+            await("Receive-only peers must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val original=a.links.getValue("b").pc
+            // Deliberately hold both offers until both peers have made a local offer.
+            a.enableMicrophone();b.enableMicrophone()
+            await("Both upgrade offers must be made before delivery"){queue.count{it.second=="offer"}>=2}
+            await("Simultaneous permission upgrades must settle both audio senders"){drain();
+                listOf(a.links.getValue("b"),b.links.getValue("a")).all{l->
+                    l.pc.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&
+                    l.pc.transceivers.any{it.sender.track()!=null&&it.currentDirection==org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV}
+                }}
+            assertSame("Permission grant must preserve the session transport",original,a.links.getValue("b").pc)
+        }finally{a.close();b.close()}
+    }
     @Test fun coordinatorAuthenticationGroupsUnicodeAndBoundaries(){
         var now=1000L;val room=LanSession("Répétition","Zo","SAX"){now};val owner=room.ticket(room.owner).getString("token")
         try{room.call("join",JSONObject().put("code","000000"));fail("Private session must reject wrong code")}catch(_:IllegalArgumentException){}
