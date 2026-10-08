@@ -38,6 +38,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private var sampleTime=0L
     val talkControl=TalkControl()
     @Volatile var capturing=false;private set
+    @Volatile var testSignalFrames=0L;private set
     @Volatile var captureFrames=0L;private set
     @Volatile var captureNonZeroFrames=0L;private set
     @Volatile var playbackFrames=0L;private set
@@ -49,7 +50,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private var testPhase=0.0
     val testing:Boolean get()=testUntil>android.os.SystemClock.elapsedRealtime()
     private fun rms(data:ByteArray):Double {val b=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);var sum=0.0;var count=0;while(b.remaining()>=2){val v=b.short/32768.0;sum+=v*v;count++};return if(count>0)max(-120.0,20*log10(max(1e-6,sqrt(sum/count)))) else -120.0}
-    fun diagnostics()=JSONObject().put("capture",capturing&&android.os.SystemClock.elapsedRealtime()-captureAt<1500).put("captureSource",if(testing)"EXPLICIT TEST SIGNAL" else "MICROPHONE").put("captureFrames",captureFrames).put("captureNonZeroFrames",captureNonZeroFrames).put("micDbfs",level ?: JSONObject.NULL).put("decodedPlaybackFrames",playbackFrames).put("decodedNonZeroFrames",playbackNonZeroFrames).put("rxDbfs",receiveLevel ?: JSONObject.NULL).put("playbackRunning",playing).put("receiving",playing&&android.os.SystemClock.elapsedRealtime()-playbackAt<1500&&(receiveLevel ?: -120.0)>-90).put("testActive",testing).put("armed",talkControl.armed).put("mode",talkControl.mode).put("threshold",talkControl.threshold).put("closeDelayMs",talkControl.closeDelayMs).put("timeoutMs",talkControl.timeoutMs).put("noiseReduction",talkControl.noiseReduction)
+    fun diagnostics()=JSONObject().put("capture",capturing&&!testing&&android.os.SystemClock.elapsedRealtime()-captureAt<1500).put("captureSource",if(testing)"EXPLICIT TEST SIGNAL" else "MICROPHONE").put("testSignalFrames",testSignalFrames).put("captureFrames",captureFrames).put("captureNonZeroFrames",captureNonZeroFrames).put("micDbfs",level ?: JSONObject.NULL).put("decodedPlaybackFrames",playbackFrames).put("decodedNonZeroFrames",playbackNonZeroFrames).put("rxDbfs",receiveLevel ?: JSONObject.NULL).put("playbackRunning",playing).put("receiving",playing&&android.os.SystemClock.elapsedRealtime()-playbackAt<1500&&(receiveLevel ?: -120.0)>-90).put("testActive",testing).put("armed",talkControl.armed).put("mode",talkControl.mode).put("threshold",talkControl.threshold).put("closeDelayMs",talkControl.closeDelayMs).put("timeoutMs",talkControl.timeoutMs).put("noiseReduction",talkControl.noiseReduction)
     @Synchronized fun heartbeat(){val now=android.os.SystemClock.elapsedRealtime();if(testUntil!=0L&&now>=testUntil){testUntil=0;adm.setAudioRecordEnabled(true);talkControl.stop()};talkControl.tick(now);talkRequested=testing||talkControl.requested;refreshTalk()}
     @Synchronized fun mode(value:String){stopTest();talkControl.mode(value);talkRequested=false;refreshTalk()}
     @Synchronized fun testAudio(){require(source!=null&&!muted&&roster.find{it.optString("id")==self}?.optBoolean("canTalk",true)!=false){"Microphone autorisé et permission de parole requis"};talkControl.stop();testUntil=android.os.SystemClock.elapsedRealtime()+2000;testPhase=0.0;adm.setAudioRecordEnabled(false);talkRequested=true;refreshTalk()}
@@ -90,9 +91,9 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             .setUseHardwareAcousticEchoCanceler(JavaAudioDeviceModule.isBuiltInAcousticEchoCancelerSupported())
             .setUseHardwareNoiseSuppressor(noiseReduction&&JavaAudioDeviceModule.isBuiltInNoiseSuppressorSupported())
             .setSamplesReadyCallback { a ->
-                captureAt=android.os.SystemClock.elapsedRealtime();captureFrames+=a.data.size/2
-                val db=rms(a.data);if(db>-90)captureNonZeroFrames+=a.data.size/2
-                val now=System.nanoTime();if(now-sampleTime>100000000L){sampleTime=now;level=db;defer{talkControl.level(db,android.os.SystemClock.elapsedRealtime());heartbeat()}}
+                val db=rms(a.data);val test=testing
+                if(test)testSignalFrames+=a.data.size/2 else {captureAt=android.os.SystemClock.elapsedRealtime();captureFrames+=a.data.size/2;if(db>-90)captureNonZeroFrames+=a.data.size/2}
+                val now=System.nanoTime();if(now-sampleTime>100000000L){sampleTime=now;if(!test)level=db;defer{if(!test)talkControl.level(db,android.os.SystemClock.elapsedRealtime());heartbeat()}}
             }.createAudioDeviceModule()
         val localOnly=PeerConnectionFactory.Options().apply{networkIgnoreMask=PeerConnectionFactory.Options.ADAPTER_TYPE_CELLULAR or PeerConnectionFactory.Options.ADAPTER_TYPE_VPN}
         factory=PeerConnectionFactory.builder().setOptions(localOnly).setAudioDeviceModule(adm).createPeerConnectionFactory()
@@ -190,7 +191,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         if(l.ignoreOffer)return
         val s=SessionDescription(if(type=="offer")SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER,LanAddress.sdp(data.getString("sdp")))
         fun apply(){if(links[id]!==l)return;l.pc.setRemoteDescription(observer(done={synchronized(this){if(links[id]===l){l.remote=true;l.pending.forEach{l.pc.addIceCandidate(it)};l.pending.clear();if(type=="offer")l.pc.createAnswer(observer(created={if(links[id]===l)publish(id,"answer",it)}),MediaConstraints()) else if(l.renegotiate){l.renegotiate=false;offer(id)}}}}),s)}
-        if(collision){++l.offerEpoch;l.makingOffer=false;l.renegotiate=true
+        if(collision){++l.offerEpoch;l.makingOffer=false;l.renegotiate=false
             if(l.pc.signalingState()==PeerConnection.SignalingState.HAVE_LOCAL_OFFER)l.pc.setLocalDescription(observer(done={apply()}),SessionDescription(SessionDescription.Type.ROLLBACK,"")) else apply()
         }else apply()
     }

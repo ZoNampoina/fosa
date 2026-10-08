@@ -14,7 +14,7 @@ function resumeIdentity(code){let saved;try{saved=JSON.parse(localStorage.getIte
 }
 export class WebLanClient {
   constructor(changed=()=>{}){this.changed=changed;this.links=new Map();this.pending=new Map();this.serial=0;this.ack=0;this.members=[];this.target='all';this.listenTarget='all';this.talking=false;this.talkRequested=false;this.muted=false;this.master=.75;this.mutes=new Set();this.microphone=null;this.level=null;this.profile=null;this.error='';this.audioUnlocked=false;this.talkControl=new TalkControl();this.statsPoll=0;this.captureFrames=0;this.captureNonZeroFrames=0;this.captureAt=0;this.audioTick=setInterval(()=>this.audioHeartbeat(),100);this.repairAttempts=new Map();}
-  async microphoneReady(){if(this.microphone)return;try{
+  async microphoneReady(){if(this.microphone)return;clearInterval(this.audioTick);this.audioTick=setInterval(()=>this.audioHeartbeat(),100);try{
     const raw=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:this.talkControl.noiseReduction,autoGainControl:true},video:false});this.raw=raw;
     const ctx=this.context=new AudioContext({latencyHint:'interactive',sampleRate:48000});await ctx.resume();
     const source=ctx.createMediaStreamSource(raw),hpf=ctx.createBiquadFilter(),compressor=ctx.createDynamicsCompressor(),dest=ctx.createMediaStreamDestination();hpf.type='highpass';hpf.frequency.value=100;compressor.threshold.value=-12;compressor.knee.value=4;compressor.ratio.value=12;compressor.attack.value=.003;compressor.release.value=.15;

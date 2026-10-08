@@ -68,6 +68,7 @@ class MobileService:Service() {
     private fun start(i:Intent){
         if(rtc!=null)return
         unadvertise();http?.close();http=null;room=null;wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()}
+        if(i.getBooleanExtra("host",false)&&i.getStringExtra("network")!="HOTSPOT"){hotspotName="";hotspotPassword=""}
         networkIp=if(i.getBooleanExtra("host",false))connection.hostNetwork(i.getStringExtra("network") ?: "CURRENT") else LanAddress.ip(this).orEmpty()
         val network=LanAddress.wifi(this);getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(if(room!=null||connection.transport==TransportKind.HOTSPOT||connection.transport==TransportKind.WIFI_DIRECT)null else network)
         audio.mode=AudioManager.MODE_IN_COMMUNICATION
@@ -224,7 +225,9 @@ class MobileService:Service() {
     }
     private fun forceRepair(engine:RtcMobile){
         if(engine.talkControl.mode!="HOLD")engine.push(false)
-        val ids=engine.links.keys.toList()
+        val ids=engine.links.keys.filter{(audioRepairs[it] ?: 0)<3}
+        if(ids.isEmpty()){engine.push(false);error="Trois réparations audio échouées : vérifie le réseau et lance TEST AUDIO avant un nouvel essai";publish();return}
+        ids.forEach{id->audioRepairs[id]=(audioRepairs[id] ?: 0)+1}
         ids.forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}}
         engine.repair()
         val members=session.optJSONArray("members")

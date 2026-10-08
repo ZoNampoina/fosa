@@ -25,7 +25,8 @@ class FosaConnectionManager(private val ctx:Context,private val changed:(Connect
     private fun scanLan(){lan.discover(::record){}}
     fun announce(q:JSONObject){lan.announce(q);direct.announce(q)}
     fun hostNetwork(selection:String="AUTO"):String {
-        if(transport==TransportKind.HOTSPOT){val end=System.currentTimeMillis()+4000;while(System.currentTimeMillis()<end){hotspot.address()?.let{return it};Thread.sleep(100)};throw IllegalArgumentException("Le réseau FOSA local ne fournit pas encore d’adresse. Réessaie.")}
+        if(selection!="HOTSPOT"&&selection!="AUTO"&&transport==TransportKind.HOTSPOT)hotspot.close()
+        if(selection=="HOTSPOT"||selection=="AUTO"&&transport==TransportKind.HOTSPOT){val end=System.currentTimeMillis()+4000;while(System.currentTimeMillis()<end){hotspot.address()?.let{return it};Thread.sleep(100)};throw IllegalArgumentException("Le réseau FOSA local ne fournit pas encore d’adresse. Réessaie.")}
         if(selection=="CURRENT"){transport=TransportKind.LAN;return LanAddress.currentIp(ctx) ?: throw IllegalArgumentException("Réseau actuel inutilisable : active le Wi-Fi ou Ethernet et vérifie l’adresse locale. Aucun réglage du routeur n’est modifié.")}
         if(selection!="WIFI_DIRECT")LanAddress.ip(ctx)?.let{transport=TransportKind.LAN;return it}
         transport=TransportKind.WIFI_DIRECT;phase(ConnectionPhase.CONNECTING_NETWORK)

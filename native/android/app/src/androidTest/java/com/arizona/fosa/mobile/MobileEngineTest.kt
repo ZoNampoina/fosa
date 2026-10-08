@@ -58,7 +58,7 @@ class MobileEngineTest {
             val aRx=a.playbackNonZeroFrames;val bRx=b.playbackNonZeroFrames
             a.testAudio();b.testAudio()
             await("Both actual native decoders must output nonzero PCM, not just enabled tracks"){drain();a.stats();b.stats();a.playbackNonZeroFrames>aRx+4800&&b.playbackNonZeroFrames>bRx+4800}
-            assertTrue(a.captureNonZeroFrames>4800);assertTrue(b.captureNonZeroFrames>4800)
+            assertTrue(a.testSignalFrames>4800);assertTrue(b.testSignalFrames>4800)
             await("Explicit test must stop after two seconds"){a.heartbeat();b.heartbeat();!a.testing&&!b.testing&&!a.talkRequested&&!b.talkRequested}
             a.mode("TAP");a.push(true);assertTrue(a.talkControl.armed);a.panic(true);a.panic(false);assertFalse(a.talkControl.armed);assertFalse(a.talkRequested)
             a.push(true);members[0].put("canTalk",false);a.sync(members);members[0].put("canTalk",true);a.sync(members);assertFalse("Permission restoration cannot reopen TAP",a.talkControl.armed)
