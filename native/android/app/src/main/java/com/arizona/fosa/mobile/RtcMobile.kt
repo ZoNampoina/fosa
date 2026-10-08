@@ -171,7 +171,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         override fun onCreateFailure(s:String){defer{error="Audio SDP creation: $s";failed?.invoke(s);changed()}}
         override fun onSetFailure(s:String){defer{error="Audio SDP negotiation: $s";failed?.invoke(s);changed()}}
     }
-    @Synchronized private fun updateNegotiatedSend(){links.values.forEach{l->l.sendReady=l.track!=null&&l.pc.transceivers.any{t->t.sender.track()?.id()==l.track?.id()&&t.currentDirection in listOf(RtpTransceiver.RtpTransceiverDirection.SEND_RECV,RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)}}}
+    @Synchronized private fun updateNegotiatedSend(){links.values.forEach{l->if(l.pc.signalingState()==PeerConnection.SignalingState.STABLE)l.sendReady=l.track!=null&&AudioNegotiation.sending(l.pc.localDescription?.description.orEmpty(),l.pc.remoteDescription?.description.orEmpty())}}
+
     private fun publish(id:String,type:String,s:SessionDescription,epoch:Int?=null){val l=links[id]?:return
         if(epoch!=null&&epoch!=l.offerEpoch)return
         l.pc.setLocalDescription(observer(done={if(links[id]===l){l.makingOffer=false;signal(id,type,JSONObject().put("sdp",LanAddress.localSdp(context,s.description)).put("type",type));if(type=="answer"&&l.renegotiate){l.renegotiate=false;offer(id)}}},failed={l.makingOffer=false}),s)
@@ -205,9 +206,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             if(local?.get("candidateType") in listOf("relay","srflx")||remote?.get("candidateType") in listOf("relay","srflx"))defer{error="Chemin audio externe refusé";push(false);remove(id);changed()}
         }}}
         if(s.type=="candidate-pair"&&m["state"]=="succeeded"&&m["currentRoundTripTime"] is Number)out.put("rttMs",(m["currentRoundTripTime"] as Number).toDouble()*1000)
-        if(s.type=="codec")m["mimeType"]?.let{out.put("codec",it)}
-        if(s.type=="outbound-rtp"&&m["kind"]=="audio"){for(k in listOf("packetsSent","bytesSent"))(m[k] as? Number)?.let{out.put(k,it.toLong())}}
-        if(s.type=="inbound-rtp"&&m["kind"]=="audio"){for(k in listOf("bytesReceived","totalAudioEnergy","totalSamplesReceived","totalSamplesDuration","audioLevel"))(m[k] as? Number)?.let{out.put(k,it)};(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
+        if(s.type=="outbound-rtp"&&m["kind"]=="audio"){m["codecId"]?.let{report.statsMap[it.toString()]?.members?.get("mimeType")?.let{mime->out.put("codec",mime)}};for(k in listOf("packetsSent","bytesSent"))(m[k] as? Number)?.let{out.put(k,it.toLong())}}
+        if(s.type=="inbound-rtp"&&m["kind"]=="audio"){m["codecId"]?.let{report.statsMap[it.toString()]?.members?.get("mimeType")?.let{mime->out.put("receiveCodec",mime)}};for(k in listOf("bytesReceived","totalAudioEnergy","totalSamplesReceived","totalSamplesDuration","audioLevel"))(m[k] as? Number)?.let{out.put(k,it)};(m["jitter"] as? Number)?.let{out.put("jitterMs",it.toDouble()*1000)};val lost=(m["packetsLost"] as? Number)?.toDouble();val rx=(m["packetsReceived"] as? Number)?.toDouble();if(rx!=null)out.put("packetsReceived",rx.toLong());if(lost!=null&&rx!=null&&rx+lost>0)out.put("loss",100*max(0.0,lost)/(rx+lost))}
     };out.put("txPacketsDelta",max(0L,out.optLong("packetsSent")-l.stats.optLong("packetsSent"))).put("rxPacketsDelta",max(0L,out.optLong("packetsReceived")-l.stats.optLong("packetsReceived"))).put("signalingState",l.pc.signalingState().name).put("negotiatedSender",l.sendReady).put("senderEnabled",l.track?.enabled() ?: false);l.stats=out;changed() }}}
     @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
     @Synchronized fun reset(){talkControl.stop();stopTest();talkRequested=false;talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}

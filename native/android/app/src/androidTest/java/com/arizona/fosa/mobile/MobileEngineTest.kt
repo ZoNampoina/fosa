@@ -37,6 +37,10 @@ class MobileEngineTest {
         }finally{a.close();b.close()}
     }
     @Test fun talkControlTimeoutVoxAndNoRearm(){
+        fun sdp(direction:String,port:Int=9)="v=0\r\nm=audio $port UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=$direction\r\n"
+        assertTrue(AudioNegotiation.sending(sdp("sendrecv"),sdp("recvonly")))
+        assertFalse(AudioNegotiation.sending(sdp("recvonly"),sdp("sendonly")))
+        assertFalse(AudioNegotiation.sending(sdp("sendrecv"),sdp("sendrecv",0)))
         val c=TalkControl();assertEquals("HOLD",c.mode);assertFalse(c.armed)
         c.active(true,1000);c.tick(31000);assertFalse(c.requested)
         c.mode("TAP");c.active(true,1000);c.tick(181000);assertTrue("TAP must stay open for minutes without HOLD timer",c.requested)

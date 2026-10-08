@@ -243,7 +243,8 @@ class MobileService:Service() {
         threshold?.let{engine.talkControl.threshold=it.coerceIn(-60.0,-12.0);prefs.edit().putFloat("vox-threshold",engine.talkControl.threshold.toFloat()).apply()}
         closeDelay?.let{engine.talkControl.closeDelayMs=it.coerceIn(150,3000);prefs.edit().putLong("vox-close",engine.talkControl.closeDelayMs).apply()}
         timeout?.let{engine.talkControl.safetyTimeout(it,SystemClock.elapsedRealtime());prefs.edit().putLong("talk-timeout",engine.talkControl.timeoutMs).apply()}
-        noiseReduction?.let{if(it!=engine.talkControl.noiseReduction){push(false);prefs.edit().putBoolean("noise-reduction",it).apply();enqueue{engine.links.keys.toList().forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}};engine.close();rtc=newRtc();publish()}}};publish()
+        noiseReduction?.let{if(it!=engine.talkControl.noiseReduction){push(false);prefs.edit().putBoolean("noise-reduction",it).apply();enqueue{engine.links.keys.toList().forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}};val savedMaster=engine.master;val savedTarget=engine.target;val savedListen=engine.listenTarget;val savedMutes=engine.mutedMembers();val savedMode=engine.talkControl.mode;val savedPanic=engine.muted
+                engine.close();rtc=newRtc().also{fresh->fresh.volume(savedMaster);fresh.destination(savedTarget);fresh.listen(savedListen);savedMutes.forEach{fresh.memberMute(it,true)};fresh.mode(savedMode);if(savedPanic)fresh.panic(true)};publish()}}};publish()
     }
     fun testAudio(){try{rtc?.testAudio();publish()}catch(e:Exception){error=e.message.orEmpty();publish()}}
     fun pauseHold(){if(rtc?.talkControl?.mode=="HOLD")push(false)}
