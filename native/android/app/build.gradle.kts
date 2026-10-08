@@ -6,7 +6,7 @@ android {
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     namespace = "com.arizona.fosa"
     compileSdk = 35
-    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "0.13.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "com.arizona.fosa"; minSdk = 26; targetSdk = 35; versionCode = 21; versionName = "0.14.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     System.getenv("FOSA_DEBUG_KEYSTORE")?.let { path ->
         signingConfigs.getByName("debug").apply {
             storeFile = file(path); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"

@@ -25,7 +25,7 @@ class MobileService:Service() {
     private val main=Handler(Looper.getMainLooper())
     // A P2P discovery/group operation can wait on the worker. Existing peers
     // must still see their host online, and held Talk keeps its safety limit.
-    private val ownerBeat=object:Runnable{override fun run(){if(instance!==this@MobileService)return;val engine=rtc;val host=room;if(engine!=null&&host!=null){if(engine.talkRequested&&SystemClock.elapsedRealtime()>talkUntil)engine.push(false);host.touchOwner(engine.talking,engine.target,engine.level);if(LanAddress.ip(this@MobileService)!=null)lastPoll=SystemClock.elapsedRealtime()};main.postDelayed(this,1000)}}
+    private val ownerBeat=object:Runnable{override fun run(){if(instance!==this@MobileService)return;val engine=rtc;val host=room;if(engine!=null&&host!=null){engine.heartbeat();host.touchOwner(engine.talking,engine.target,engine.level);if(LanAddress.ip(this@MobileService)!=null)lastPoll=SystemClock.elapsedRealtime()};main.postDelayed(this,1000)}}
     private val publication=java.util.concurrent.atomic.AtomicLong();private var appliedPublication=0L
     private val work=Executors.newSingleThreadScheduledExecutor()
     private var room:LanSession?=null;private var http:LanHttp?=null;private var https:LanHttp?=null;private var rtc:RtcMobile?=null
@@ -33,7 +33,8 @@ class MobileService:Service() {
     private var servedAddresses=emptySet<String>()
     private var joiningCode="";private var lastReconnectAttempt=0L
     private val connection by lazy{FosaConnectionManager(this){p,_,message->connectionPhase=p;if(message.isNotBlank())error=message;publish()}}
-    private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var talkUntil=0L;private var repairDue=0L
+    private var profile=JSONObject();private var session=JSONObject();private var address="";private var ack=0L;private var ticks=0;private var repairDue=0L
+    private val audioRepairs=ConcurrentHashMap<String,Int>()
     private var routeWarning="";private var hadWired=false
     private val routes=object:AudioDeviceCallback(){override fun onAudioDevicesAdded(d:Array<out AudioDeviceInfo>){routeAudio()};override fun onAudioDevicesRemoved(d:Array<out AudioDeviceInfo>){routeAudio()}}
     private var error="";private var phase="idle";private var lastPoll=0L;private var mic=false
@@ -55,7 +56,7 @@ class MobileService:Service() {
         when(i?.action){
             "START"->{ foreground();enqueue{try{start(i)}catch(e:Exception){fail(e.message ?: "Impossible de démarrer")}} }
             "HOTSPOT"->{if(Build.VERSION.SDK_INT>=29)startForeground(114,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)else startForeground(114,notification());createLocalNetwork()}
-            "TALK"->push(!(rtc?.talkRequested ?: false),5000)
+            "TALK"->{if(rtc?.talkControl?.mode=="HOLD")talkMode("TAP");push(!(rtc?.talkControl?.armed ?: false))}
             "MUTE"->panic(!(rtc?.muted ?: false))
             "STOP"->stopSelf()
         }
@@ -67,7 +68,7 @@ class MobileService:Service() {
     private fun start(i:Intent){
         if(rtc!=null)return
         unadvertise();http?.close();http=null;room=null;wake?.let{if(it.isHeld)it.release()};wifi?.let{if(it.isHeld)it.release()};multicast?.let{if(it.isHeld)it.release()}
-        networkIp=if(i.getBooleanExtra("host",false))connection.hostNetwork() else LanAddress.ip(this).orEmpty()
+        networkIp=if(i.getBooleanExtra("host",false))connection.hostNetwork(i.getStringExtra("network") ?: "CURRENT") else LanAddress.ip(this).orEmpty()
         val network=LanAddress.wifi(this);getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(if(room!=null||connection.transport==TransportKind.HOTSPOT||connection.transport==TransportKind.WIFI_DIRECT)null else network)
         audio.mode=AudioManager.MODE_IN_COMMUNICATION
         @Suppress("DEPRECATION")
@@ -104,7 +105,7 @@ class MobileService:Service() {
     private fun newRtc()=RtcMobile(this,profile.getString("id"),mic,{to,type,data->enqueue{try{call("signal",JSONObject().put("to",to).put("type",type).put("data",data))}catch(_:Exception){}}},{publish()},{id,q->
         val host=room ?: throw IllegalArgumentException("Coordinateur indisponible")
         host.call(q.getString("path"),q.optJSONObject("body") ?: JSONObject(),host.ticket(id).getString("token"),"rtc:$id")
-    })
+    },prefs.getBoolean("noise-reduction",true)).also{engine->engine.talkControl.threshold=prefs.getFloat("vox-threshold",-36f).toDouble();engine.talkControl.closeDelayMs=prefs.getLong("vox-close",650);engine.talkControl.timeoutMs=prefs.getLong("talk-timeout",0)}
     private fun normalizeAddress(raw:String):String {val u=Uri.parse(if(raw.contains("://"))raw else "http://$raw");require(u.scheme=="http"&&LanAddress.privateV4(u.host ?: "")&&u.port in 1..65535&&u.userInfo==null){"Adresse locale invalide"};return "http://${u.host}:${u.port}"}
     private fun startLocalServers(){
         http?.close();https?.close();https=null
@@ -188,9 +189,9 @@ class MobileService:Service() {
     }catch(_:Exception){}}}
     private fun tick(){try {
         val engine=rtc ?: return
-        val now=SystemClock.elapsedRealtime();if(engine.talkRequested&&now>talkUntil)engine.push(false)
+        val now=SystemClock.elapsedRealtime();engine.heartbeat()
         if(engine.talkRequested&&!engine.talking&&repairDue>0&&now>=repairDue){forceRepair(engine);repairDue=now+5000}
-        val ip=if(room!=null&&connection.transport==TransportKind.HOTSPOT)connection.hotspot.address() else LanAddress.ip(this)
+        val ip=if(room!=null)connection.currentAddress() else LanAddress.ip(this)
         if(ip==null){engine.push(false);connectionPhase=ConnectionPhase.RECONNECTING;phase="Réseau perdu · reconnexion";publish();recoverConnection();return}
         if(ip!=networkIp){engine.push(false);engine.reset();networkIp=ip;if(room==null)connection.bind(address) else getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(LanAddress.wifi(this));if(room!=null){startLocalServers();advertise()}}
         if(room!=null&&LanAddress.ips().toSet()!=servedAddresses){if(connection.direct.groupInterface.isNotBlank())getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);startLocalServers();advertise()}
@@ -204,25 +205,25 @@ class MobileService:Service() {
             ack=maxOf(ack,s.getLong("seq"))}
         if(++ticks%4==0){engine.stats();getSystemService(NotificationManager::class.java).notify(114,notification())};if(room!=null&&SystemClock.elapsedRealtime()<webPairingUntil&&ticks%3==0)rendezvousCycle()
         // Recreate failed links after a bounded interval. The smaller UUID offers, avoiding glare.
-        if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)}.keys.forEach{id->call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
+        if(ticks%16==0)engine.links.filter{!it.value.connected&&!manual.contains(it.key)&&(audioRepairs[it.key] ?: 0)<3}.keys.forEach{id->audioRepairs[id]=(audioRepairs[id] ?: 0)+1;call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()));engine.receive(id,"reset",JSONObject())}
         publish()
     }catch(e:Exception){rtc?.push(false);if(connectionPhase!=ConnectionPhase.RECONNECTING)reconnectCount++;connectionPhase=ConnectionPhase.RECONNECTING;phase="Reconnexion locale";error="Hôte inaccessible. Même Wi-Fi, sans isolation des clients ?";publish();recoverConnection()}}
     private fun recoverConnection(){if(SystemClock.elapsedRealtime()-lastReconnectAttempt<7000||room==null&&lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<6000)return
         lastReconnectAttempt=SystemClock.elapsedRealtime()
-        if(room!=null){if(connection.transport==TransportKind.WIFI_DIRECT)try{networkIp=connection.hostNetwork();getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);rtc?.reset();startLocalServers();advertise()}catch(e:Exception){error=e.message.orEmpty()};return}
+        if(room!=null){if(connection.transport==TransportKind.WIFI_DIRECT)try{networkIp=connection.hostNetwork("WIFI_DIRECT");getSystemService(ConnectivityManager::class.java).bindProcessToNetwork(null);rtc?.reset();startLocalServers();advertise()}catch(e:Exception){error=e.message.orEmpty()};return}
         if(joiningCode.isBlank())return
         try{val found=connection.resolve(joiningCode,address,profile.optString("session"));connection.bind(found.address)
             val body=JSONObject().put("code",joiningCode).put("name",profile.optString("name")).put("role",profile.optString("role")).put("client","Native Android").put("resumeToken",profile.optString("token")).put("clientKey",prefs.getString("client-key:$joiningCode",""))
             val resumed=connection.join(found,body);require(resumed.getString("id")==profile.getString("id")){"Identité de reprise différente"};profile=resumed;address=found.address;ack=0;rtc?.reset();prefs.edit().putString("profile",profile.toString()).putString("address",address).apply()
         }catch(_:Exception){}
     }
-    fun push(active:Boolean,ttl:Long=30000){
-        talkUntil=SystemClock.elapsedRealtime()+ttl
+    fun push(active:Boolean){
         val engine=rtc;engine?.push(active)
         repairDue=if(active&&engine?.talkRequested==true&&!engine.talking)SystemClock.elapsedRealtime()+1200 else 0L
-        publish()
+        publish();getSystemService(NotificationManager::class.java).notify(114,notification())
     }
     private fun forceRepair(engine:RtcMobile){
+        if(engine.talkControl.mode!="HOLD")engine.push(false)
         val ids=engine.links.keys.toList()
         ids.forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}}
         engine.repair()
@@ -231,8 +232,17 @@ class MobileService:Service() {
         error="";phase="Audio · reconnexion directe";publish()
     }
     fun enableWebPairing(ttl:Long=120000){if(room==null)return;webPairingUntil=SystemClock.elapsedRealtime()+ttl;enqueue{rendezvousCycle()};publish()}
-    fun repairAudio(){enqueue{rtc?.let{forceRepair(it)}}}
-    fun target(value:String){rtc?.let{it.push(false,value)};publish()}
+    fun repairAudio(){audioRepairs.clear();enqueue{rtc?.let{forceRepair(it)}}}
+    fun talkMode(value:String){rtc?.mode(value);publish()}
+    fun audioOptions(threshold:Double?=null,closeDelay:Long?=null,timeout:Long?=null,noiseReduction:Boolean?=null){val engine=rtc ?: return
+        threshold?.let{engine.talkControl.threshold=it.coerceIn(-60.0,-12.0);prefs.edit().putFloat("vox-threshold",engine.talkControl.threshold.toFloat()).apply()}
+        closeDelay?.let{engine.talkControl.closeDelayMs=it.coerceIn(150,3000);prefs.edit().putLong("vox-close",engine.talkControl.closeDelayMs).apply()}
+        timeout?.let{engine.talkControl.timeoutMs=it.coerceIn(0,3600000);prefs.edit().putLong("talk-timeout",engine.talkControl.timeoutMs).apply()}
+        noiseReduction?.let{if(it!=engine.talkControl.noiseReduction){push(false);prefs.edit().putBoolean("noise-reduction",it).apply();enqueue{engine.links.keys.toList().forEach{id->try{call("signal",JSONObject().put("to",id).put("type","reset").put("data",JSONObject()))}catch(_:Exception){}};engine.close();rtc=newRtc();publish()}}};publish()
+    }
+    fun testAudio(){try{rtc?.testAudio();publish()}catch(e:Exception){error=e.message.orEmpty();publish()}}
+    fun pauseHold(){if(rtc?.talkControl?.mode=="HOLD")push(false)}
+    fun target(value:String){rtc?.destination(value);publish()}
     fun listen(value:String){rtc?.listen(value);publish()}
     fun panic(active:Boolean){if(!active)routeWarning="";rtc?.panic(active);publish();getSystemService(NotificationManager::class.java).notify(114,notification())}
     fun volume(value:Double){rtc?.volume(value);publish()}
@@ -289,7 +299,7 @@ class MobileService:Service() {
         val wired=audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any{it.type in types}
         if(hadWired&&!wired){rtc?.panic(true);routeWarning="Écouteurs débranchés : mute local. Vérifie la sortie avant UNMUTE."}
         hadWired=wired
-        try{if(Build.VERSION.SDK_INT>=31){val devices=audio.availableCommunicationDevices;val chosen=devices.firstOrNull{it.type in types} ?: devices.firstOrNull{it.type==AudioDeviceInfo.TYPE_BUILTIN_SPEAKER};if(chosen!=null)audio.setCommunicationDevice(chosen)}else audio.isSpeakerphoneOn=!wired}catch(_:SecurityException){}
+        try{if(Build.VERSION.SDK_INT>=31){val devices=audio.availableCommunicationDevices;val chosen=devices.firstOrNull{it.type in types} ?: devices.firstOrNull{it.type==AudioDeviceInfo.TYPE_BUILTIN_SPEAKER};if(chosen!=null&&!audio.setCommunicationDevice(chosen))routeWarning="Sélection de sortie refusée par Android : vérifie la route système"}else audio.isSpeakerphoneOn=!wired}catch(_:SecurityException){}
         publish()
     }
     private fun output():String {
@@ -306,7 +316,8 @@ class MobileService:Service() {
     }
     private fun publish(){val version=publication.incrementAndGet();val engine=rtc;val members=session.optJSONArray("members") ?: JSONArray()
         val metrics=JSONArray();engine?.links?.forEach{(id,l)->metrics.put(JSONObject(l.stats.toString()).put("id",id).put("connected",l.connected).put("iceState",l.iceState).put("localCandidates",l.localCandidates).put("remoteCandidates",l.remoteCandidates))}
-        val s=JSONObject().put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
+        val d=engine?.diagnostics() ?: JSONObject();val sending=engine?.talking==true&&engine.links.values.any{it.stats.optLong("txPacketsDelta")>0}
+        val s=JSONObject().put("audioDiagnostics",d).put("talkMode",engine?.talkControl?.mode ?: "HOLD").put("talkArmed",engine?.talkControl?.armed ?: false).put("capturing",d.optBoolean("capture")).put("sending",sending).put("receiving",d.optBoolean("receiving")).put("receiveLevel",engine?.receiveLevel ?: JSONObject.NULL).put("microphoneSystemMuted",audio.isMicrophoneMute).put("outputSystemVolume",audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL)).put("networkInterfaces",JSONArray(LanAddress.ips())).put("wifiQr",if(hotspotName.isNotBlank())WifiQr.encode(hotspotName,hotspotPassword) else "").put("phase",phase).put("error",engine?.error?.takeIf{it.isNotBlank()} ?: error.ifBlank{routeWarning}).put("active",engine!=null).put("host",room!=null).put("sessionName",profile.optString("sessionName")).put("name",profile.optString("name")).put("role",profile.optString("role")).put("id",profile.optString("id"))
             .put("members",members).put("metrics",metrics).put("talk",engine?.talking ?: false).put("talkRequested",engine?.talkRequested ?: false).put("target",engine?.target ?: "all").put("listenTarget",engine?.listenTarget ?: "all").put("muted",engine?.muted ?: false).put("mic",engine?.microphoneReady() ?: mic).put("level",engine?.level ?: JSONObject.NULL).put("output",output()).put("address",address).put("code",room?.code ?: "").put("join",if(room!=null)joinLink() else "").put("answer",pairAnswer)
             .put("master",engine?.master ?: .75).put("mutedMembers",JSONArray(engine?.mutedMembers() ?: emptyList<String>())).put("audioPlayback",engine?.playing ?: false).put("latency",JSONObject.NULL).put("internetRequired",false).put("battery",getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
             .put("connectionPhase",connectionPhase.name).put("transport",connection.transport.label).put("signaling","LOCAL").put("reconnectCount",reconnectCount).put("web",if(https!=null)"https://$networkIp:48766/" else "").put("webSetup","http://$networkIp:${http?.port ?: preferredLanPort}/trust").put("webError",webError).put("fingerprint",tls?.ca?.let{java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString(":"){b->"%02X".format(b)}} ?: "").put("hotspotName",hotspotName).put("hotspotPassword",hotspotPassword).put("local",LanAddress.ip(this)!=null).put("webPairing",room!=null&&SystemClock.elapsedRealtime()<webPairingUntil).put("controlConnected",lastPoll>0&&SystemClock.elapsedRealtime()-lastPoll<5000)
@@ -317,8 +328,8 @@ class MobileService:Service() {
     private fun notification():Notification {val open=PendingIntent.getActivity(this,0,Intent(this,MobileActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         fun action(value:String)=PendingIntent.getService(this,value.hashCode(),Intent(this,MobileService::class.java).setAction(value),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return Notification.Builder(this,"fosa-mobile").setSmallIcon(R.drawable.fosa_logo).setContentTitle("FOSA MOBILE · ${profile.optString("sessionName","Local")}")
-            .setContentText(if(rtc?.talking==true)"TALK · arrêt automatique après 5 s" else "LAN · ${(session.optJSONArray("members")?.length() ?: 1)} membres · ${if(rtc?.muted==true)"MUTED" else "Écoute active"}")
-            .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
+            .setContentText(if(rtc?.talkControl?.armed==true)"MIC OPEN · ${rtc?.talkControl?.mode} · toucher STOP TALK pour fermer" else "LAN · ${(session.optJSONArray("members")?.length() ?: 1)} membres · ${if(rtc?.muted==true)"MUTED" else "Écoute active"}")
+            .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,if(rtc?.talkControl?.armed==true)"STOP TALK" else "TAP TALK",action("TALK")).build()).addAction(Notification.Action.Builder(null,"MUTE",action("MUTE")).build()).addAction(Notification.Action.Builder(null,"OPEN",open).build()).build() }
     fun disconnect(){push(false);panic(true);enqueue{
         // A failed leave may still leave the old slot on the host. Keep its
         // private proof so the next join restores it rather than duplicating it.

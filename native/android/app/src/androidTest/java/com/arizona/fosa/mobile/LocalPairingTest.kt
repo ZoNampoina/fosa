@@ -46,12 +46,21 @@ class LocalPairingTest {
         assertFalse(room.call("device-poll",admit).getBoolean("approved"));room.call("device-admit",admit,room.ticket(room.owner).getString("token"));assertTrue(room.call("device-poll",admit).getBoolean("approved"))
         try{room.call("device-admit",admit,room.ticket(room.owner).getString("token"));fail("Second scan must not admit again")}catch(_:IllegalArgumentException){}
     }
+    @Test fun realWifiQrEscapingAndSessionSeparation(){
+        val ssid="FOSA; Local: \"Band\",\\",password="a;:b,\\c\"12345"
+        val payload=WifiQr.encode(ssid,password)
+        val matrix=QRCodeWriter().encode(payload,BarcodeFormat.QR_CODE,384,384);val pixels=IntArray(384*384){i->if(matrix[i%384,i/384])android.graphics.Color.BLACK else android.graphics.Color.WHITE}
+        val decoded=QRCodeReader().decode(BinaryBitmap(HybridBinarizer(RGBLuminanceSource(384,384,pixels))))
+        val wifi=com.google.zxing.client.result.ResultParser.parseResult(decoded) as com.google.zxing.client.result.WifiParsedResult
+        assertEquals(ssid,wifi.ssid);assertEquals(password,wifi.password);assertEquals("WPA",wifi.networkEncryption)
+        assertFalse(payload.startsWith("fosa:"));assertTrue(payload.startsWith("WIFI:"))
+    }
     @Test fun bundledWebAndRealLocalTlsWithoutInternet(){
         val room=LanSession("LIVE","ZO","HOST");val tls=LanTls(ctx,listOf("192.168.49.1"));val server=LanHttp("127.0.0.1",room,ctx=ctx,ca=tls.ca,factory=tls.factory)
         val trust=KeyStore.getInstance(KeyStore.getDefaultType()).apply{load(null);setCertificateEntry("host",java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(tls.ca.inputStream()))}
         val tm=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply{init(trust)}
         val ssl=SSLContext.getInstance("TLS").apply{init(null,tm.trustManagers,null)}
-        try{for(asset in listOf("","app.js","core.js","connection.js","qr.js","style.css","icon.svg","sw.js","manifest.json")){
+        try{for(asset in listOf("","app.js","core.js","connection.js","talk.js","meter-worklet.js","qr.js","style.css","icon.svg","sw.js","manifest.json")){
             val c=URL("https://localhost:${server.port}/$asset").openConnection() as HttpsURLConnection;c.sslSocketFactory=ssl.socketFactory;c.readTimeout=4000
             val bytes=c.inputStream.use{it.readBytes()};assertTrue("Bundled $asset must load over actual TLS",bytes.isNotEmpty());assertEquals(200,c.responseCode);c.disconnect()
         }

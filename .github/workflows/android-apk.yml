@@ -15,6 +15,8 @@ concurrency:
 jobs:
   verify:
     uses: ./.github/workflows/verify-audio.yml
+    with:
+      android_only: true
   build:
     needs: verify
     runs-on: ubuntu-latest
@@ -74,21 +76,21 @@ jobs:
         run: cp native/android/app/build/outputs/apk/debug/app-debug.apk FOSA-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: FOSA-Android-v0.13.0
+          name: FOSA-Android-v0.14.0
           path: FOSA-Android.apk
       - name: Publish stable Android download
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="FOSA Mobile 0.13.0 LOCAL-FIRST PAIRING: local code discovery and signaling, native Android Wi-Fi Direct, local hotspot creation, short session/device QR, embedded local HTTPS WebApp, resume identity and local-only Opus/DTLS/SRTP. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host's local certificate once. Build commit: $GITHUB_SHA. See docs/mobile/LOCAL-FIRST-REPORT.md."
-          if ! gh release view v0.13.0 >/dev/null 2>&1; then
-            gh release create v0.13.0 FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA 0.13.0 · LOCAL-FIRST PAIRING" --notes "$notes" --latest=false
+          notes="FOSA Mobile 0.14.0 AUDIO + HANDS-FREE: simultaneous microphone negotiation repair, real capture/RTP/decoded PCM diagnostics, explicit two-second audio test, HOLD/TAP/AUTO controls, current-network setup and real hotspot Wi-Fi QR. Physical Wi-Fi Direct and WAN-disconnected device scenarios still require validation. Web microphone/PWA require trusting this host's local certificate once. Build commit: $GITHUB_SHA. See docs/mobile/AUDIO-HANDSFREE-REPORT.md."
+          if ! gh release view v0.14.0 >/dev/null 2>&1; then
+            gh release create v0.14.0 FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA 0.14.0 · AUDIO + HANDS-FREE" --notes "$notes" --latest=false
           fi
           if gh release view android-latest >/dev/null 2>&1; then
             gh release upload android-latest FOSA-Android.apk --clobber
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-latest" -f sha="$GITHUB_SHA" -F force=true
-            gh release edit android-latest --title "FOSA Android v0.13.0" --notes "$notes" --latest
+            gh release edit android-latest --title "FOSA Android v0.14.0" --notes "$notes" --latest
           else
-            gh release create android-latest FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA Android v0.13.0" --notes "$notes" --latest
+            gh release create android-latest FOSA-Android.apk --target "$GITHUB_SHA" --title "FOSA Android v0.14.0" --notes "$notes" --latest
           fi

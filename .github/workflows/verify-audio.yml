@@ -3,10 +3,15 @@ on:
   push:
   pull_request:
   workflow_call:
+    inputs:
+      android_only:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   ios-preparation:
+    if: ${{ inputs.android_only != true }}
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
