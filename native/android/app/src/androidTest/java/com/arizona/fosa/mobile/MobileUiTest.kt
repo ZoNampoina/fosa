@@ -45,11 +45,20 @@ class MobileUiTest {
         ui.waitUntil(8000){peer!!.receivedPackets()>packets}
         // Real discovery can occupy the service worker longer than presence
         // timeout. A missing device must not disconnect an existing LAN peer.
+        val discoveryPackets=peer!!.receivedPackets()
+        val captureFrames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
         ui.activityRule.scenario.onActivity{MobileService.instance!!.addDevice(PairingQr.device("ffffffffffff",PairingQr.nonce()))}
         Thread.sleep(14000)
         assertTrue("Talk must remain active during device discovery",MobileService.state.optBoolean("talk"))
-        assertTrue("Existing Opus packets must continue during discovery",peer!!.receivedPackets()>packets+100)
+        ui.waitUntil(5000){peer!!.receivedPackets()>discoveryPackets}
+        assertTrue("Real capture callbacks must continue while the worker discovers devices",(MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0)>captureFrames)
         ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
+        ui.onNodeWithTag("mode-TAP").performScrollTo().performClick();ui.onNodeWithTag("talk-button").performScrollTo().performClick()
+        ui.waitUntil(4000){MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed")}
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);Thread.sleep(32000)
+        assertTrue("Native TAP must survive activity background and HOLD safety time",MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed"))
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);ui.onNodeWithTag("talk-button").performScrollTo().performClick();ui.waitUntil(1500){!MobileService.state.optBoolean("talkArmed")}
+        ui.onNodeWithTag("mode-HOLD").performScrollTo().performClick()
         val peerId=peer!!.id;peer!!.reconnect()
         ui.waitUntil(15000){MobileService.state.optJSONArray("members")?.let{a->a.length()==2&&(0 until a.length()).any{a.getJSONObject(it).optString("id")==peerId&&a.getJSONObject(it).optInt("generation",1)==2}}==true}
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.optJSONObject(0)?.let{it.optBoolean("connected")&&it.optString("id")==peerId}==true}
