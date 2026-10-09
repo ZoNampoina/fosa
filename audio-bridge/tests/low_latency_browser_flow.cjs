@@ -42,13 +42,17 @@ async function main(){
     // Real Bodypack gain reaches decoded PCM; panic is local even without its RPC.
     await a.page.locator('.net-nav [data-view=mix]').click();
     const rms=()=>a.page.evaluate(async()=>{
-      // Median across distinct audio windows rejects a transient rebuffer/fade.
-      const values=[];
-      for(let i=0;i<9;i++){
+      // The fixture emits a stationary 440 Hz sine. Rebuffer fades alter window
+      // RMS without changing gain; require multiple complete decoded sine windows.
+      const values=[],end=Date.now()+12000;let rejected=0;
+      while(values.length<9&&Date.now()<end){
         await new Promise(r=>setTimeout(r,100));
         const a=window.testOutput,s=new Float32Array(a.fftSize);a.getFloatTimeDomainData(s);
-        values.push(Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length));
+        const rms=Math.sqrt(s.reduce((v,n)=>v+n*n,0)/s.length),peak=s.reduce((v,n)=>Math.max(v,Math.abs(n)),0),crest=peak/rms;
+        if(rms>.001&&crest>1.35&&crest<1.5)values.push(rms);else rejected++;
       }
+      (window.testRmsWindows??=[]).push({values:[...values],rejected});
+      if(values.length<9)throw Error('Nine complete decoded sine windows required within 12 seconds: '+JSON.stringify({values,rejected}));
       return values.sort((a,b)=>a-b)[4];
     });
     await a.page.waitForFunction(()=>document.querySelector('[data-pan="0"]').value==='-100'&&document.querySelector('[data-gain="2"]').value==='0');
@@ -57,7 +61,7 @@ async function main(){
     await a.page.waitForFunction(()=>document.querySelector('#mixNotice').textContent.startsWith('Mix enregistré')&&document.querySelector('#monitorGain').value==='6');
     const boosted=(await admin('state')).users.find(p=>p.id===a.credentials.id);
     assert.equal(boosted.mix.monitorGainDb,6);assert.equal(boosted.mix.master,.5);
-    const after=await rms();assert.ok(after>before*1.6&&after<before*2.4,`+6 dB must approximately double decoded RMS: ${before} -> ${after}`);
+    const after=await rms();console.log('FOSA_PCM_GAIN '+JSON.stringify({before,after,ratio:after/before,windows:await a.page.evaluate(()=>testRmsWindows)}));assert.ok(after>before*1.6&&after<before*2.4,`+6 dB must approximately double decoded RMS: ${before} -> ${after}`);
     assert.ok(boosted.levels.outputPeakDb>boosted.levels.mixPeakDb-1);
     await a.page.screenshot({path:output+'/bodypack-personal-mix.png',fullPage:true});
     await a.page.locator('#lockMix').click();assert.equal(await a.page.locator('#monitorGain').isDisabled(),true);
