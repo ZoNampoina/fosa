@@ -11,6 +11,8 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -51,11 +53,17 @@ val FosaTypography=Typography(
 @Composable fun FosaTalkButton(transmitting:Boolean,requesting:Boolean,enabled:Boolean,onHold:(Boolean)->Unit,modifier:Modifier=Modifier,hint:String="Hold to transmit",mode:String="HOLD"){val haptic=androidx.compose.ui.platform.LocalHapticFeedback.current;val vibrate=LocalFosaHaptic.current
     val currentHold by rememberUpdatedState(onHold);val currentEnabled by rememberUpdatedState(enabled);val currentVibrate by rememberUpdatedState(vibrate);val currentMode by rememberUpdatedState(mode)
     val active=transmitting||requesting;val currentActive by rememberUpdatedState(active)
-    LaunchedEffect(enabled){if(!enabled)currentHold(false)}
+    var keyboardHeld by remember{mutableStateOf(false)}
+    LaunchedEffect(enabled){if(!enabled){keyboardHeld=false;currentHold(false)}}
     val title=if(transmitting)if(mode=="HOLD")"TALKING" else "MIC OPEN" else if(requesting)if(mode=="AUTO")"AUTO ARMED" else "CONNECTING…" else when(mode){"TAP"->"TAP TO TALK";"AUTO"->"ARM AUTO";else->"HOLD TO TALK"}
     Box(modifier.sizeIn(minWidth=180.dp,minHeight=180.dp).aspectRatio(1f).clip(CircleShape).background(if(transmitting)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
         .border(2.dp,if(transmitting)MaterialTheme.colorScheme.primary else if(requesting)FosaColors.Warning else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.25f),CircleShape)
         .testTag("talk-button").semantics{role=Role.Button;stateDescription=title;if(!enabled)disabled();onClick(label=if(active)"Stop talking" else "Start talking"){if(enabled){currentHold(!currentActive);true}else false}}
+        .onKeyEvent{event->if(event.key in listOf(Key.Spacebar,Key.Enter,Key.DirectionCenter)&&currentEnabled){
+            if(event.type==KeyEventType.KeyDown&&event.nativeKeyEvent.repeatCount==0){if(currentMode=="HOLD"){keyboardHeld=true;currentHold(true)}else currentHold(!currentActive)}
+            if(event.type==KeyEventType.KeyUp&&keyboardHeld){keyboardHeld=false;currentHold(false)};true
+        }else false}
+        .onFocusChanged{if(!it.isFocused&&keyboardHeld){keyboardHeld=false;currentHold(false)}}.focusable(enabled)
         .pointerInput(Unit){awaitEachGesture{val down=awaitFirstDown(requireUnconsumed=false)
             if(currentEnabled){down.consume();if(currentVibrate)haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                 val held=currentMode=="HOLD"

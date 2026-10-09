@@ -32,7 +32,7 @@ class MobileEngineTest {
             await("Simultaneous permission upgrades must settle both audio senders"){drain();
                 listOf(a.links.getValue("b"),b.links.getValue("a")).all{l->
                     l.pc.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&
-                    l.pc.transceivers.any{it.sender.track()!=null&&it.currentDirection==org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV}
+                    l.sendReady&&l.pc.transceivers.any{it.sender.track()?.id()==l.track?.id()&&it.currentDirection in listOf(org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV,org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)}
                 }}
             assertSame("Permission grant must preserve the session transport",original,a.links.getValue("b").pc)
             val aRx=a.playbackNonZeroFrames;val bRx=b.playbackNonZeroFrames

@@ -1,6 +1,6 @@
 # FOSA Mobile 0.14.0 — audio, mains libres et réseau local
 
-Date : 8 octobre 2026. Android versionCode 21. Ce rapport sépare les preuves de transport/PCM des essais d’audibilité sur les appareils des musiciens.
+Audit initial : 8 octobre 2026 ; reprise : 9 octobre 2026 (UTC). Android versionCode 21. Ce rapport sépare les preuves de transport/PCM des essais d’audibilité sur les appareils des musiciens.
 
 ## État de livraison
 
@@ -12,7 +12,7 @@ La version candidate est en validation Android/Web. Les liens de publication, le
 
 Preuve avant correctif : [diagnostic Android de la base](https://github.com/ZoNampoina/fosa/actions/runs/37811664536), commit de laboratoire `bd4fbae` dérivé de `c1e040f` (uniquement le test ajouté à 0.13.0 et son workflow). Le test UI ancien échoue aussi sur une hypothèse de débit : sur un microphone silencieux, Opus peut produire peu de paquets. Ce deuxième résultat ne prouve pas une coupure sonore.
 
-Le correctif conserve le PeerConnection lors du changement de permission. Le pair de plus petite identité ignore l’offre en collision ; l’autre annule son offre locale avant d’appliquer l’offre distante. Les opérations Web sont sérialisées, les offres en attente sont suivies, les erreurs SDP apparaissent dans les diagnostics. Le moteur vérifie aussi qu’un sender audio est effectivement négocié avant de déclarer la parole active.
+Le correctif conserve le PeerConnection lors du changement de permission. Le pair de plus petite identité ignore l’offre en collision ; l’autre annule son offre locale avant d’appliquer l’offre distante. Les opérations SDP Android et Web sont sérialisées jusqu’à leur callback de fin. Après un rollback, la renégociation des nouvelles pistes reste demandée. Les offres en attente sont suivies et dédupliquées, et les erreurs SDP apparaissent dans les diagnostics. Le moteur vérifie aussi qu’un sender audio est effectivement négocié avant de déclarer la parole active. Le SDP du SDK natif identifie parfois le sender réutilisé par un UUID distinct du nom de la piste microphone ; le contrôle suit cet identifiant réel. Une négociation peut valablement répartir l’audio sur deux sections SEND_ONLY/RECV_ONLY : le test exige la piste microphone correspondante et du PCM décodé bidirectionnel, plutôt qu’une direction SEND_RECV particulière.
 
 **Défaut d’affichage indépendant :** le vu-mètre microphone était forcé à zéro hors transmission. Il suit désormais le PCM réellement capturé, même lorsque la porte de parole est fermée. Un micro autorisé, une piste créée et ICE connecté sont des états distincts de la capture et du son reçu.
 
@@ -30,9 +30,11 @@ Ces constats établissent des causes logicielles vérifiables. Ils ne démontren
 | Lecture / sortie | PCM mélangé réellement écrit vers AudioTrack, compteur non nul, route et volume Android | audio.play(), lecture bloquée/démarrée, mute/volume et niveau décodé |
 | Latence physique | UNKNOWN | UNKNOWN |
 
+Les diagnostics donnent aussi des messages lisibles pour le micro bloqué/silencieux, la piste non négociée, l’absence de paquets récents, la lecture bloquée, la permission de réception et les volumes à zéro. Ils ne prétendent pas distinguer avec certitude un silence envoyé d’un défaut de décodage.
+
 Les niveaux sont en dBFS ; les octets et paquets sont des compteurs cumulés de la connexion, les deltas décrivent la dernière période de mesure. Une piste muette peut encore transporter du RTP de silence. Le RTT ne représente pas la latence microphone → casque. La lecture PCM ne prouve pas à elle seule qu’une personne entend du son.
 
-`SETTINGS → AUDIO DIAGNOSTICS → TEST AUDIO` injecte explicitement deux secondes de 660 Hz dans la vraie chaîne d’envoi Opus, vers la destination choisie. Il faut un micro autorisé et la permission de parole. Il s’arrête automatiquement, et Panic/fermeture/révocation l’arrêtent. Le signal traverse le sender, RTP, le décodeur et le chemin de sortie mesuré. Sur Android, `testSignalFrames` est séparé de `captureFrames` / `captureNonZeroFrames` : le test synthétique ne gonfle pas la preuve de capture physique. Aucun son de test n’est lancé automatiquement.
+`SETTINGS → AUDIO DIAGNOSTICS → TEST AUDIO` injecte explicitement deux secondes de 660 Hz dans la vraie chaîne d’envoi Opus, vers la destination choisie. Il faut un micro autorisé et la permission de parole. Il s’arrête automatiquement, et Panic/fermeture/révocation l’arrêtent. Le signal traverse le sender, RTP, le décodeur et le chemin de sortie mesuré. Sur Android, `testSignalFrames` est séparé de `captureFrames` / `captureNonZeroFrames` : le test synthétique ne gonfle pas la preuve de capture physique. La tonalité native remplace volontairement le PCM avant l’encodeur, tout en conservant l’horloge réelle d’AudioRecord. Désactiver AudioRecord dans ce SDK donnait des callbacks sans octets et sans cadence ; cette erreur du candidat a été détectée par le test natif → Web puis corrigée. Aucun son de test n’est lancé automatiquement.
 
 ## HOLD, TAP et AUTO
 
@@ -64,35 +66,35 @@ Les réparations audio automatiques sont bornées à trois par pair ; les repris
 | Vérification | Preuve / environnement | Résultat |
 |---|---|---|
 | Collision SDP avant correctif | deux moteurs natifs réels, émulateur API 35 | échec reproduit sur la base |
-| Collision SDP après correctif | même test, même PeerConnection, directions SEND_RECV | en cours |
-| Capture Web + deux sens Opus | WAV via getUserMedia → AudioWorklet → vraie chaîne, Chromium | réussi sur candidat 03f5822 |
-| TAP prolongé | PCM décodé distant mesuré pendant 180 secondes réelles | réussi sur candidat 03f5822 |
-| Trois locuteurs simultanés | six chemins WebRTC, énergie et PCM non nul dans chaque direction | réussi sur candidat 03f5822 |
-| Panic / permissions / reset / reprise | porte fermée sans réarmement, même identité, pas de doublon | réussi sur candidat 03f5822 |
-| AUTO avec vrai PCM | armement, seuil haut/bas, délai et arrêt | réussi sur candidat 62d8bb4 |
-| Native ↔ native / native ↔ Web HTTPS | encodeurs/décodeurs réels, tonalités explicites, PCM de sortie | en cours |
-| TAP natif en arrière-plan | activité arrêtée >30 s, session/service et capture actifs | en cours |
-| Wi-Fi QR | encodeur QR puis décodage ZXing, SSID/password spéciaux | en cours |
-| Bodypack / bridge / Low Latency / talkback PC | régressions Windows/Linux, Chromium/WebKit, PCM/Opus, routage/permissions | réussi sur candidat 03f5822 |
-| iOS préparatoire | compilation SwiftUI sur macOS 15 Intel | réussi sur candidat 03f5822 ; aucun client iOS natif livré |
-| Petits écrans et paysage | Talk/Panic au-dessus de la navigation, captures 320/375/844/1024 px | réussi Web ; Android en cours |
+| Collision SDP après correctif | même PeerConnection, sender réel actif (SEND_RECV ou SEND_ONLY), puis PCM décodé dans les deux sens | en cours |
+| Capture Web + deux sens Opus | WAV via getUserMedia → AudioWorklet → vraie chaîne, Chromium | réussi sur candidat 0c21300 |
+| TAP prolongé | PCM décodé distant mesuré pendant 180 secondes réelles | réussi sur candidat 0c21300 |
+| Trois locuteurs simultanés | six chemins WebRTC, énergie et PCM non nul dans chaque direction | réussi sur candidat 0c21300 |
+| Panic / permissions / reset / reprise | porte fermée sans réarmement, même identité, pas de doublon | réussi sur candidat 0c21300 |
+| AUTO avec vrai PCM | armement, seuil haut/bas, délai et arrêt | réussi sur candidat 0c21300 |
+| Native ↔ native / native ↔ Web HTTPS | encodeurs/décodeurs réels, tonalités explicites, PCM de sortie | réussi sur candidat 0c21300 ; aucune preuve de micro physique |
+| TAP natif en arrière-plan | activité arrêtée pendant 180 s, callbacks AudioRecord et RTP suivis | réussi sur candidat 1763b74 ; micro d’émulateur silencieux, preuve de continuité des callbacks et du RTP |
+| Wi-Fi QR | encodeur QR puis décodage ZXing, SSID/password spéciaux | réussi sur candidat 0c21300 ; scan radio physique restant |
+| Bodypack / bridge / Low Latency / talkback PC | régressions Windows/Linux, Chromium/WebKit, PCM/Opus, routage/permissions | réussi sur candidat 0c21300 |
+| iOS préparatoire | compilation SwiftUI sur macOS 15 Intel | réussi sur candidat 0c21300 ; aucun client iOS natif livré |
+| Petits écrans et paysage | Talk/Panic au-dessus de la navigation, captures 320/375/844/1024 px | réussi Web ; Android Pixel 6 émulé portrait/paysage sur 0c21300 |
 
-[CI Web et régressions du candidat 03f5822](https://github.com/ZoNampoina/fosa/actions/runs/37814193058). Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Les tests Android utilisent le vrai coordinateur Kotlin. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un iPhone/PC/téléphone physique. L’environnement de développement ne fournit que loopback : le test média local y échoue en l’absence de candidats privés admissibles, sans assouplir les filtres de production. Les tests de capture/UI/politique de parole peuvent néanmoins s’y exécuter.
+[CI Web et régressions du candidat 0c21300](https://github.com/ZoNampoina/fosa/actions/runs/37864612574). [Essais Android 0c21300](https://github.com/ZoNampoina/fosa/actions/runs/37864612967) : 14/15 tests réussis ; seule la collision de permission reste en échec sur ce candidat. Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Les tests Android utilisent le vrai coordinateur Kotlin. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un iPhone/PC/téléphone physique. L’environnement de développement ne fournit que loopback : le test média local y échoue en l’absence de candidats privés admissibles, sans assouplir les filtres de production. Les tests de capture/UI/politique de parole peuvent néanmoins s’y exécuter.
 
 ### Exemple de mesures Web réellement collectées
 
-Instantané lors de l’essai trois locuteurs du candidat 03f5822, après cinq secondes d’émission simultanée. Chaque cellule décrit une connexion distincte ; ces compteurs ne sont pas un débit moyen ni une mesure de latence.
+Instantané lors de l’essai trois locuteurs du candidat 0c21300, après cinq secondes d’émission simultanée. Chaque cellule décrit une connexion distincte ; ces compteurs ne sont pas un débit moyen ni une mesure de latence.
 
 | Sens | Octets TX / RX vus par le pair local | Énergie audio reçue | RMS décodé reçu |
 |---|---:|---:|---:|
-| Hôte ↔ invité 1 | 23 486 / 23 545 | 0,008108 | −32,89 dBFS |
-| Hôte ↔ invité 2 | 19 982 / 20 073 | 0,020055 | −29,91 dBFS |
-| Invité 1 ↔ hôte | 23 545 / 23 486 | 0,007270 | −34,82 dBFS |
-| Invité 1 ↔ invité 2 | 20 439 / 20 484 | 0,020574 | −33,17 dBFS |
-| Invité 2 ↔ hôte | 20 073 / 20 063 | 0,007287 | −35,95 dBFS |
-| Invité 2 ↔ invité 1 | 20 484 / 20 439 | 0,008115 | −34,66 dBFS |
+| Hôte ↔ invité 1 | 19 594 / 20 218 | 0,008562 | −32,48 dBFS |
+| Hôte ↔ invité 2 | 18 584 / 20 048 | 0,016986 | −32,70 dBFS |
+| Invité 1 ↔ hôte | 20 218 / 19 594 | 0,007710 | −35,96 dBFS |
+| Invité 1 ↔ invité 2 | 18 578 / 20 511 | 0,016955 | −33,07 dBFS |
+| Invité 2 ↔ hôte | 20 048 / 18 584 | 0,007775 | −32,94 dBFS |
+| Invité 2 ↔ invité 1 | 20 511 / 18 578 | 0,008432 | −36,00 dBFS |
 
-Les compteurs de capture Web non nulle sont respectivement 9 313 408, 367 872 et 275 456 échantillons. L’entrée est simulée par Chromium ; aucune conclusion sur les microphones physiques ne découle de ces chiffres. Les snapshots RTP étant asynchrones, TX et RX opposés peuvent différer légèrement.
+Les compteurs de capture Web non nulle sont respectivement 9 356 800, 372 736 et 285 184 échantillons. L’entrée est simulée par Chromium ; aucune conclusion sur les microphones physiques ne découle de ces chiffres. Les snapshots RTP étant asynchrones, TX et RX opposés peuvent différer légèrement.
 
 ## Fichiers modifiés
 

@@ -106,7 +106,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     private fun createMicrophone()=factory.createAudioSource(MediaConstraints().apply{mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation","true"));mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression",noiseReduction.toString()));mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl","true"))})
     /** Granting permission must keep the live data channel and listening tracks. */
     @Synchronized fun enableMicrophone(){if(source!=null)return;source=createMicrophone();error=""
-        links.forEach{(id,l)->val track=factory.createAudioTrack("mic-$id",source!!);track.setEnabled(false);l.track=track;l.pc.addTrack(track,listOf("fosa"));offer(id)}
+        links.forEach{(id,l)->val track=factory.createAudioTrack("mic-$id",source!!);track.setEnabled(false);l.track=track;senderIds[id]=l.pc.addTrack(track,listOf("fosa")).id();offer(id)}
         refreshTalk()
     }
     fun microphoneReady():Boolean=source!=null
@@ -158,7 +158,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
             override fun onRenegotiationNeeded(){defer{observed?.takeIf{links[id]===it}?.let{if(it.renegotiate)offer(id)}}}
             override fun onAddTrack(r:RtpReceiver,streams:Array<out MediaStream>){val track=r.track() as? AudioTrack ?: return;val link=observed ?: return;defer{synchronized(this@RtcMobile){if(links[id]===link){link.received=track;track.setVolume(master);applyListen()}}}}
         }) ?: error("Audio WebRTC indisponible")
-        val track=source?.let{factory.createAudioTrack("mic-$id",it).also{t->t.setEnabled(false);pc.addTrack(t,listOf("fosa"))}}
+        val track=source?.let{factory.createAudioTrack("mic-$id",it).also{t->t.setEnabled(false);senderIds[id]=pc.addTrack(t,listOf("fosa")).id()}}
         if(track==null)pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO,RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
         val link=Link(pc,track);observed=link;links[id]=link
         return link
@@ -175,7 +175,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         override fun onCreateFailure(s:String){defer{error="Audio SDP creation: $s";failed?.invoke(s);changed()}}
         override fun onSetFailure(s:String){defer{error="Audio SDP negotiation: $s";failed?.invoke(s);changed()}}
     }
-    @Synchronized private fun updateNegotiatedSend(){links.forEach{(id,l)->if(l.pc.signalingState()==PeerConnection.SignalingState.STABLE)l.sendReady=l.track!=null&&AudioNegotiation.sending(l.pc.localDescription?.description.orEmpty(),l.pc.remoteDescription?.description.orEmpty(),"mic-$id")}}
+    private val senderIds=mutableMapOf<String,String>()
+    @Synchronized private fun updateNegotiatedSend(){links.forEach{(id,l)->if(l.pc.signalingState()==PeerConnection.SignalingState.STABLE)l.sendReady=l.track!=null&&senderIds[id]?.let{AudioNegotiation.sending(l.pc.localDescription?.description.orEmpty(),l.pc.remoteDescription?.description.orEmpty(),it)}==true}}
 
     // Hold the operation until its asynchronous SDP callback finishes. A new
     // offer arriving while an answer is being applied is not a second glare.
@@ -186,7 +187,8 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         if(epoch!=null&&epoch!=l.offerEpoch){complete(id,l);return}
         l.pc.setLocalDescription(observer(done={synchronized(this){if(links[id]===l){l.makingOffer=false;signal(id,type,JSONObject().put("sdp",LanAddress.localSdp(context,s.description)).put("type",type));if(type=="answer"&&l.renegotiate){l.renegotiate=false;offer(id)};complete(id,l)}}},failed={l.makingOffer=false;complete(id,l)}),s)
     }
-    @Synchronized fun offer(id:String){val l=make(id);enqueue(id,l){
+    private val queuedOffers=mutableSetOf<String>()
+    @Synchronized fun offer(id:String){val l=make(id);if(l.makingOffer){l.renegotiate=true;return};if(!queuedOffers.add(id))return;enqueue(id,l){queuedOffers.remove(id)
         if(l.pc.signalingState()!=PeerConnection.SignalingState.STABLE){l.renegotiate=true;complete(id,l)}else{
             l.renegotiate=false;l.makingOffer=true;val epoch=++l.offerEpoch
             if(l.channel==null)wire(id,l.pc.createDataChannel("fosa-mobile",DataChannel.Init()))
@@ -226,6 +228,6 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     };out.put("txPacketsDelta",max(0L,out.optLong("packetsSent")-l.stats.optLong("packetsSent"))).put("rxPacketsDelta",max(0L,out.optLong("packetsReceived")-l.stats.optLong("packetsReceived"))).put("signalingState",l.pc.signalingState().name).put("negotiatedSender",l.sendReady).put("senderEnabled",l.track?.enabled() ?: false);l.stats=out;changed() }}}}}}
     @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
     @Synchronized fun reset(){talkControl.stop();stopTest();talkRequested=false;talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
-    @Synchronized private fun remove(id:String){if(talkControl.mode!="HOLD"){talkControl.stop();stopTest();talkRequested=false};links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
+    @Synchronized private fun remove(id:String){queuedOffers.remove(id);senderIds.remove(id);if(talkControl.mode!="HOLD"){talkControl.stop();stopTest();talkRequested=false};links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
     @Synchronized fun close(){if(closed)return;closed=true;callbacks.removeCallbacksAndMessages(null);reset();source?.dispose();factory.dispose();adm.release()}
 }
