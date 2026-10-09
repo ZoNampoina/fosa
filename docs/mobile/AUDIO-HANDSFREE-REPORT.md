@@ -66,7 +66,7 @@ Les réparations audio automatiques sont bornées à trois par pair ; les repris
 | Vérification | Preuve / environnement | Résultat |
 |---|---|---|
 | Collision SDP avant correctif | deux moteurs natifs réels, émulateur API 35 | échec reproduit sur la base |
-| Collision SDP après correctif | même PeerConnection, sender réel actif (SEND_RECV ou SEND_ONLY), puis PCM décodé dans les deux sens | en cours |
+| Collision SDP après correctif | même PeerConnection, sender réel actif (SEND_RECV ou SEND_ONLY), puis PCM décodé dans les deux sens | réussi sur candidat f4cedac |
 | Capture Web + deux sens Opus | WAV via getUserMedia → AudioWorklet → vraie chaîne, Chromium | réussi sur candidat 0c21300 |
 | TAP prolongé | PCM décodé distant mesuré pendant 180 secondes réelles | réussi sur candidat 0c21300 |
 | Trois locuteurs simultanés | six chemins WebRTC, énergie et PCM non nul dans chaque direction | réussi sur candidat 0c21300 |
@@ -79,7 +79,11 @@ Les réparations audio automatiques sont bornées à trois par pair ; les repris
 | iOS préparatoire | compilation SwiftUI sur macOS 15 Intel | réussi sur candidat 0c21300 ; aucun client iOS natif livré |
 | Petits écrans et paysage | Talk/Panic au-dessus de la navigation, captures 320/375/844/1024 px | réussi Web ; Android Pixel 6 émulé portrait/paysage sur 0c21300 |
 
-[CI Web et régressions du candidat 0c21300](https://github.com/ZoNampoina/fosa/actions/runs/37864612574). [Essais Android 0c21300](https://github.com/ZoNampoina/fosa/actions/runs/37864612967) : 14/15 tests réussis ; seule la collision de permission reste en échec sur ce candidat. Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Les tests Android utilisent le vrai coordinateur Kotlin. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un iPhone/PC/téléphone physique. L’environnement de développement ne fournit que loopback : le test média local y échoue en l’absence de candidats privés admissibles, sans assouplir les filtres de production. Les tests de capture/UI/politique de parole peuvent néanmoins s’y exécuter.
+[CI Web et régressions du candidat f4cedac](https://github.com/ZoNampoina/fosa/actions/runs/37866826884). [Essais Android f4cedac](https://github.com/ZoNampoina/fosa/actions/runs/37866827129) : les tests audio, TAP 180 s, collision SDP, QR et interface réussissent ; seul le test Bodypack échoue en lisant son état avant la fin de l’initialisation JavaScript. Sa fixture annonce maintenant sa disponibilité après la réponse du bridge, en conservant l’assertion de connexion réellement inactive. La validation du dernier candidat est en cours.
+
+Un autre test reproduit une activation audio navigateur retardée : Panic puis son relâchement annulent désormais aussi un signal de diagnostic encore en attente. Un compteur de génération empêche son démarrage tardif. La perte du transport arrête le signal explicite même en mode HOLD, côté Web et natif.
+
+Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Les tests Android utilisent le vrai coordinateur Kotlin. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un iPhone/PC/téléphone physique. L’environnement de développement ne fournit que loopback : le test média local y échoue en l’absence de candidats privés admissibles, sans assouplir les filtres de production. Les tests de capture/UI/politique de parole peuvent néanmoins s’y exécuter.
 
 ### Exemple de mesures Web réellement collectées
 

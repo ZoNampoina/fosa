@@ -147,7 +147,7 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
         var observed:Link?=null
         val pc=factory.createPeerConnection(config,object:PeerConnection.Observer {
             override fun onSignalingChange(s:PeerConnection.SignalingState){}
-            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->link.iceState=s.name;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;defer{if(links[id]===link){if(s in listOf(PeerConnection.IceConnectionState.DISCONNECTED,PeerConnection.IceConnectionState.FAILED,PeerConnection.IceConnectionState.CLOSED)&&talkControl.mode!="HOLD")push(false);refreshTalk()}}} }
+            override fun onIceConnectionChange(s:PeerConnection.IceConnectionState){observed?.takeIf{links[id]===it}?.let{link->link.iceState=s.name;link.connected=s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED;defer{if(links[id]===link){if(s in listOf(PeerConnection.IceConnectionState.DISCONNECTED,PeerConnection.IceConnectionState.FAILED,PeerConnection.IceConnectionState.CLOSED)&&(talkControl.mode!="HOLD"||testUntil!=0L))push(false);refreshTalk()}}} }
             override fun onIceConnectionReceivingChange(v:Boolean){}
             override fun onIceGatheringChange(s:PeerConnection.IceGatheringState){}
             override fun onIceCandidate(c:IceCandidate){if(observed!=null&&links[id]===observed&&LanAddress.candidate(c.sdp)&&LanAddress.localCandidate(context,c.sdp)){observed?.localIce?.add(c);observed?.localCandidates=observed?.localIce?.size ?: 0;changed();signal(id,"ice",JSONObject().put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))}}
@@ -228,6 +228,6 @@ class RtcMobile(ctx:Context, private val self:String, mic:Boolean,
     };out.put("txPacketsDelta",max(0L,out.optLong("packetsSent")-l.stats.optLong("packetsSent"))).put("rxPacketsDelta",max(0L,out.optLong("packetsReceived")-l.stats.optLong("packetsReceived"))).put("signalingState",l.pc.signalingState().name).put("negotiatedSender",l.sendReady).put("senderEnabled",l.track?.enabled() ?: false);l.stats=out;changed() }}}}}}
     @Synchronized fun repair(){talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
     @Synchronized fun reset(){talkControl.stop();stopTest();talkRequested=false;talking=false;links.values.forEach{it.track?.setEnabled(false)};links.keys.toList().forEach{remove(it)};changed()}
-    @Synchronized private fun remove(id:String){queuedOffers.remove(id);senderIds.remove(id);if(talkControl.mode!="HOLD"){talkControl.stop();stopTest();talkRequested=false};links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
+    @Synchronized private fun remove(id:String){queuedOffers.remove(id);senderIds.remove(id);if(talkControl.mode!="HOLD"||testUntil!=0L){talkControl.stop();stopTest();talkRequested=false};links.remove(id)?.let{it.channel?.close();it.channel?.dispose();it.pc.close();it.pc.dispose();it.track?.dispose()}}
     @Synchronized fun close(){if(closed)return;closed=true;callbacks.removeCallbacksAndMessages(null);reset();source?.dispose();factory.dispose();adm.release()}
 }

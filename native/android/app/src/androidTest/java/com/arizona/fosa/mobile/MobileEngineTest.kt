@@ -75,6 +75,8 @@ class MobileEngineTest {
             a.push(true);members[0].put("canTalk",false);a.sync(members);members[0].put("canTalk",true);a.sync(members);assertFalse("Permission restoration cannot reopen TAP",a.talkControl.armed)
             assertTrue(a.links.getValue("b").stats.optLong("bytesSent")>0);assertTrue(b.links.getValue("a").stats.optLong("bytesReceived")>0)
             android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_PCM a=${a.diagnostics()} stats=${a.links.getValue("b").stats} b=${b.diagnostics()} stats=${b.links.getValue("a").stats}")
+            a.mode("HOLD");a.testAudio();a.receive("b","reset",JSONObject())
+            assertFalse("Transport reset must stop an explicit diagnostic signal even in HOLD mode",a.testing);assertFalse(a.talkRequested)
         }finally{a.close();b.close()}
     }
     @Test fun coordinatorAuthenticationGroupsUnicodeAndBoundaries(){

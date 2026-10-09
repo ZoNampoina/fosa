@@ -40,7 +40,7 @@ class BodypackUiTest {
         val server=ServerSocket(0);val active=AtomicBoolean(true);val status=AtomicInteger(200)
         val worker=Thread{while(active.get())try{server.accept().use{socket->socket.soTimeout=2000
             val input=socket.getInputStream().bufferedReader();input.readLine();while(true){val line=input.readLine()?:break;if(line.isEmpty())break}
-            val bytes="<!doctype html><html><body><h1>FOSA BODYPACK LAN TEST</h1><script>document.title=typeof FosaAndroid==='object'?'NATIVE BRIDGE READY':'BRIDGE MISSING';window.nativeFacts=JSON.parse(FosaAndroid.status());</script></body></html>".toByteArray()
+            val bytes="<!doctype html><html><body><h1>FOSA BODYPACK LAN TEST</h1><script>window.nativeFacts=JSON.parse(FosaAndroid.status());document.title=typeof FosaAndroid==='object'?'NATIVE BRIDGE READY':'BRIDGE MISSING';</script></body></html>".toByteArray()
             socket.getOutputStream().write(("HTTP/1.1 ${status.get()} Test\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray()+bytes)
         }}catch(_:Exception){}}.apply{start()}
         val ip=LanAddress.ip(ctx) ?: throw AssertionError("Emulator LAN address required")
@@ -54,7 +54,7 @@ class BodypackUiTest {
             ui.onNodeWithTag("bodypack-setup").assertExists()
             ui.onNodeWithTag("bodypack-address").performScrollTo().performTextReplacement(address)
             ui.onNodeWithTag("bodypack-connect").performScrollTo().performClick()
-            ui.waitUntil(10000){javascript("document.title") == "\"NATIVE BRIDGE READY\""}
+            ui.waitUntil(10000){javascript("document.title==='NATIVE BRIDGE READY' && !!window.nativeFacts && typeof nativeFacts.connected==='boolean'") == "true"}
             assertEquals("false",javascript("nativeFacts.connected")) // no simulated READY/audio
             ui.onNodeWithTag("bodypack-connection").performClick();status.set(503)
             ui.onNodeWithTag("bodypack-connect").performScrollTo().performClick()
@@ -79,7 +79,7 @@ class BodypackUiTest {
             status.set(200);ui.onNodeWithTag("nav-SETTINGS").performClick();ui.onNodeWithTag("settings-bodypack").performScrollTo().performClick()
             opened=inst.waitForMonitorWithTimeout(monitor,5000) as? BodypackActivity
             assertNotNull(opened);ui.waitUntil(10000){MobileService.instance==null}
-            ui.waitUntil(10000){javascript("document.title") == "\"NATIVE BRIDGE READY\""}
+            ui.waitUntil(10000){javascript("document.title==='NATIVE BRIDGE READY' && !!window.nativeFacts && typeof nativeFacts.connected==='boolean'") == "true"}
         }finally{
             opened?.let{activity->inst.runOnMainSync{activity.finish()}}
             ctx.stopService(Intent(ctx,MobileService::class.java));ctx.stopService(Intent(ctx,BodypackService::class.java))
