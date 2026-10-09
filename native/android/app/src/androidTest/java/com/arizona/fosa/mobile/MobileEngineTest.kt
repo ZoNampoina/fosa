@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 @RunWith(AndroidJUnit4::class)
 class MobileEngineTest {
     private fun await(label:String,check:()->Boolean){val deadline=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<deadline){if(check())return;Thread.sleep(30)};fail(label)}
+    private fun negotiation(engine:RtcMobile)=engine.links.values.joinToString("\n"){l->"state=${l.pc.signalingState()} sendReady=${l.sendReady} error=${engine.error}\nLOCAL ${l.pc.localDescription?.description}\nREMOTE ${l.pc.remoteDescription?.description}"}
     @Test fun simultaneousMicrophonePermissionUpgradeKeepsAudioNegotiated(){
         val ctx=InstrumentationRegistry.getInstrumentation().targetContext
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
@@ -34,7 +35,7 @@ class MobileEngineTest {
                     l.pc.transceivers.any{it.sender.track()!=null&&it.currentDirection==org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV}
                 }}
             assertSame("Permission grant must preserve the session transport",original,a.links.getValue("b").pc)
-        }finally{a.close();b.close()}
+        }catch(e:Throwable){android.util.Log.e("FOSA_AUDIO_QA","FOSA_NEGOTIATION_FAILURE A ${negotiation(a)} B ${negotiation(b)}",e);throw e}finally{a.close();b.close()}
     }
     @Test fun talkControlTimeoutVoxAndNoRearm(){
         fun sdp(direction:String,port:Int=9)="v=0\r\nm=audio $port UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=$direction\r\n"
