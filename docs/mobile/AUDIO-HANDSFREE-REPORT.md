@@ -4,7 +4,15 @@ Audit initial : 8 octobre 2026 ; reprise : 9 octobre 2026 (UTC). Android version
 
 ## État de livraison
 
-La version candidate est en validation Android/Web. Les liens de publication, le commit final et les empreintes seront renseignés après les contrôles de livraison. Aucune validation de microphone, de casque ou de radio physique n’est annoncée sur la base d’un build.
+**FOSA Mobile 0.14.0 publiée et vérifiée le 9 octobre 2026 (UTC).** Android versionCode **21**, package `com.arizona.fosa`. Commit applicatif distribué : [`16cb0e684ecc08022f32f3903c456acb1f8683b2`](https://github.com/ZoNampoina/fosa/commit/16cb0e684ecc08022f32f3903c456acb1f8683b2), sur `main`, `v0.14.0` et `android-latest`. [PR #7](https://github.com/ZoNampoina/fosa/pull/7) ; [commits détaillés](https://github.com/ZoNampoina/fosa/pull/7/commits). Base de l’intervention : `922694571f5e36b635e8ea3a57f5f35b7453caf2`.
+
+- [APK versionné 0.14.0](https://github.com/ZoNampoina/fosa/releases/download/v0.14.0/FOSA-Android.apk).
+- [APK stable](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
+- [WebApp Mobile](https://zonampoina.github.io/fosa/mobile/).
+- [Notes de publication](https://github.com/ZoNampoina/fosa/releases/tag/v0.14.0).
+- [Démarrage local](QUICKSTART.md) : sans Internet, ouvrir **WEB ACCESS** fourni par l’Android hôte ; configurer la confiance de son certificat local avant d’utiliser le microphone Web.
+
+Les preuves ci-dessous portent sur le transport, le PCM décodé et les contrôles logiciels. Les microphones, casques et radios des appareils de l’utilisateur restent à vérifier physiquement.
 
 ## Défauts constatés et correction
 
@@ -46,7 +54,7 @@ Les niveaux sont en dBFS ; les octets et paquets sont des compteurs cumulés de 
 
 Le réglage de sensibilité AUTO couvre −60 à −12 dBFS, avec suppression du bruit réglable. AUTO est un détecteur d’énergie, pas un classificateur de parole : un instrument ou un bruit suffisamment fort ouvre la porte. Il n’est pas recommandé de présumer une détection fiable de la voix dans un environnement musical bruyant.
 
-TAP conserve la transmission pendant l’arrière-plan natif et ne réutilise pas le timer HOLD. Le Web ferme la parole lorsqu’il perd sa visibilité/son focus ; son fonctionnement audio en arrière-plan n’est pas garanti. Panic, Leave, perte de transport, nouvelle génération ou révocation ferment la parole sans la rouvrir automatiquement à la reprise. Le changement All / Group / Leader / User s’applique immédiatement, tout en gardant les permissions. Le choix d’écoute et les mutes par membre restent indépendants.
+TAP conserve la transmission pendant l’arrière-plan natif et ne réutilise pas le timer HOLD. Le Web ferme la parole lorsqu’il perd sa visibilité/son focus ; son fonctionnement audio en arrière-plan n’est pas garanti. Panic, Leave, nouvelle génération ou révocation ferment la parole sans réarmement automatique. La perte du transport ferme TAP/AUTO ; HOLD reste lié au geste réellement maintenu et à son garde-fou. Toute tonalité de diagnostic est annulée à la perte du transport, même en mode HOLD. Le changement All / Group / Leader / User s’applique immédiatement, tout en gardant les permissions. Le choix d’écoute et les mutes par membre restent indépendants.
 
 ## Réseau et QR
 
@@ -66,50 +74,118 @@ Les réparations audio automatiques sont bornées à trois par pair ; les repris
 | Vérification | Preuve / environnement | Résultat |
 |---|---|---|
 | Collision SDP avant correctif | deux moteurs natifs réels, émulateur API 35 | échec reproduit sur la base |
-| Collision SDP après correctif | même PeerConnection, sender réel actif (SEND_RECV ou SEND_ONLY), puis PCM décodé dans les deux sens | réussi sur candidat f4cedac |
-| Capture Web + deux sens Opus | WAV via getUserMedia → AudioWorklet → vraie chaîne, Chromium | réussi sur candidat 0c21300 |
-| TAP prolongé | PCM décodé distant mesuré pendant 180 secondes réelles | réussi sur candidat 0c21300 |
-| Trois locuteurs simultanés | six chemins WebRTC, énergie et PCM non nul dans chaque direction | réussi sur candidat 0c21300 |
-| Panic / permissions / reset / reprise | porte fermée sans réarmement, même identité, pas de doublon | réussi sur candidat 0c21300 |
-| AUTO avec vrai PCM | armement, seuil haut/bas, délai et arrêt | réussi sur candidat 0c21300 |
-| Native ↔ native / native ↔ Web HTTPS | encodeurs/décodeurs réels, tonalités explicites, PCM de sortie | réussi sur candidat 0c21300 ; aucune preuve de micro physique |
-| TAP natif en arrière-plan | activité arrêtée pendant 180 s, callbacks AudioRecord et RTP suivis | réussi sur candidat 1763b74 ; micro d’émulateur silencieux, preuve de continuité des callbacks et du RTP |
-| Wi-Fi QR | encodeur QR puis décodage ZXing, SSID/password spéciaux | réussi sur candidat 0c21300 ; scan radio physique restant |
-| Bodypack / bridge / Low Latency / talkback PC | régressions Windows/Linux, Chromium/WebKit, PCM/Opus, routage/permissions | réussi sur candidat 0c21300 |
-| iOS préparatoire | compilation SwiftUI sur macOS 15 Intel | réussi sur candidat 0c21300 ; aucun client iOS natif livré |
-| Petits écrans et paysage | Talk/Panic au-dessus de la navigation, captures 320/375/844/1024 px | réussi Web ; Android Pixel 6 émulé portrait/paysage sur 0c21300 |
+| Collision SDP après correctif | transport conservé, sender réel SEND_RECV ou SEND_ONLY, PCM décodé dans les deux sens | réussi |
+| Capture Web et deux sens Opus | WAV via getUserMedia → AudioWorklet → vrais encodeurs/décodeurs Chromium | réussi |
+| TAP Web prolongé | PCM décodé distant suivi pendant 180 secondes réelles | réussi |
+| Trois clients Web simultanés | six chemins WebRTC, énergie et PCM non nul dans chaque direction | réussi |
+| Panic / permissions / reset / identité | porte fermée sans réarmement, reprise sans doublon | réussi |
+| Activation audio retardée | Panic annule aussi une tonalité encore en attente d’AudioContext | réussi |
+| AUTO avec vrai PCM | armement, seuil haut/bas, délai et arrêt | réussi |
+| Natifs ↔ natifs | deux moteurs dans un émulateur, tonalités explicites, PCM réel écrit vers AudioTrack | réussi |
+| Android ↔ Web HTTPS local | coordinateur Kotlin, encodeurs/décodeurs réels, PCM distant mesuré par le Worklet de production | réussi |
+| TAP natif en arrière-plan | activité arrêtée pendant 180 s, callbacks AudioRecord et RTP suivis, sans tonalité de test | réussi ; continuité du moteur, aucune preuve de microphone physique |
+| Wi-Fi QR / QR session / appairage | encodeur puis décodage ZXing, caractères SSID/password spéciaux, QR courts | réussi ; scan radio physique restant |
+| Bodypack / bridge / Low Latency / PC | régressions Windows/Linux, Chromium/WebKit, PCM/Opus, routage et permissions | réussi |
+| Gain Bodypack +6 dB | neuf fenêtres PCM de sinusoïde complète avant/après, rapport RMS attendu ×1,6 à ×2,4 | réussi ; assertion de gain conservée |
+| iOS préparatoire | compilation SwiftUI sur macOS 15 Intel | réussi ; aucun client iOS natif livré |
+| Écrans et paysage | assertions d’interface/captures 320/375/844/1024 px ; Android Pixel 6 émulé portrait/paysage ; HOLD tactile/clavier | réussi |
 
-[CI Web et régressions du candidat f4cedac](https://github.com/ZoNampoina/fosa/actions/runs/37866826884). [Essais Android f4cedac](https://github.com/ZoNampoina/fosa/actions/runs/37866827129) : les tests audio, TAP 180 s, collision SDP, QR et interface réussissent ; seul le test Bodypack échoue en lisant son état avant la fin de l’initialisation JavaScript. Sa fixture annonce maintenant sa disponibilité après la réponse du bridge, en conservant l’assertion de connexion réellement inactive. La validation du dernier candidat est en cours.
+La livraison Android exige le succès des **15 tests fonctionnels instrumentés** et des régressions Web/bridge ; le test visuel de splash est collecté séparément. Les workflows du commit distribué ont tous réussi :
 
-Un autre test reproduit une activation audio navigateur retardée : Panic puis son relâchement annulent désormais aussi un signal de diagnostic encore en attente. Un compteur de génération empêche son démarrage tardif. La perte du transport arrête le signal explicite même en mode HOLD, côté Web et natif.
+- [Build FOSA Android APK](https://github.com/ZoNampoina/fosa/actions/runs/37871010202) : SUCCESS.
+- [Verify FOSA Audio](https://github.com/ZoNampoina/fosa/actions/runs/37871010029) : SUCCESS.
+- [Deploy FOSA to GitHub Pages](https://github.com/ZoNampoina/fosa/actions/runs/37871010244) : SUCCESS.
 
-Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Les tests Android utilisent le vrai coordinateur Kotlin. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un iPhone/PC/téléphone physique. L’environnement de développement ne fournit que loopback : le test média local y échoue en l’absence de candidats privés admissibles, sans assouplir les filtres de production. Les tests de capture/UI/politique de parole peuvent néanmoins s’y exécuter.
+Prévalidation : natif sur `a052bc2`, Web/PR sur `fad40b2`. Le dernier changement de test PC n’a modifié aucun fichier applicatif Android/Mobile ; les workflows de livraison ont ensuite répété les assertions sur `16cb0e684ecc08022f32f3903c456acb1f8683b2`.
+
+Le rapport final est consigné après les contrôles de publication dans un commit de documentation distinct. Les empreintes ci-dessous décrivent les artefacts du commit applicatif distribué.
+
+Le coordinateur Node est une fixture de protocole ; le moteur média Chromium est réel. Android utilise le coordinateur Kotlin réel. Deux moteurs dans le même émulateur peuvent sélectionner une route interne `127.0.0.1` / `prflx` : ce résultat ne valide pas deux radios Android sur un routeur. Les tests Web vérifient séparément une paire host/host, DTLS connecté, aucun serveur ICE et aucune requête externe. Les filtres ICE privés de production sont conservés. Le WebView de laboratoire accepte explicitement son certificat de test ; cela ne valide pas l’installation du certificat sur un appareil physique.
+
+La statistique RTT apparaît de façon asynchrone après une reconstruction de transport : le test attend sa valeur réelle, avec une limite de 15 secondes. Le test natif → Web conserve les compteurs PCM et le pic RMS sur toute la tonalité de deux secondes, puis exige une augmentation d’énergie RTP et une lecture active. Il ne dépend plus d’une seule lecture instantanée qui peut manquer le signal lorsque le thread UI de l’émulateur est retardé. Les deux directions de ce test sont isolées successivement. La tonalité reste arrêtée après Panic, même si l’activation audio est retardée, et après une perte du transport en mode HOLD.
+
+Pour le contrôle +6 dB, la fixture PC produit une sinusoïde constante. La mesure retient neuf fenêtres décodées complètes, dans un délai maximal de 12 secondes, afin d’exclure les fondus de rebuffering. Les bornes ×1,6 à ×2,4 restent appliquées au RMS réellement décodé. La continuité et les pertes PCM ont leurs assertions distinctes.
+
+Mesure du commit livré : RMS numérique normalisé **0,017684 → 0,035250**, soit un rapport **×1,9934**.
+
+### Exemple de mesures natives et hybride
+
+Instantanés du test sur émulateur API 35 ; les tonalités explicites isolent la chaîne média. Les compteurs sont cumulés et les statistiques RTP sont asynchrones. Les niveaux/compteurs suivants ne constituent ni une preuve de microphone parlé, ni une mesure de latence physique.
+
+| Sens / essai | Mesure réelle | Résultat |
+|---|---|---|
+| Natif A → B | 9 paquets / 791 octets TX ; 98 400 échantillons de sortie non nuls sur B | Opus et DTLS connectés |
+| Natif B → A | 8 paquets / 636 octets TX ; 95 040 échantillons de sortie non nuls sur A | Opus et DTLS connectés |
+| Web → natif | 97 920 échantillons PCM de sortie non nuls | vraie réception native |
+| Natif → Web | 77 184 échantillons PCM distants non nuls ; pic mesuré -31.05 dBFS | Worklet branché sur le MediaStream distant ; énergie RTP en hausse et lecture active |
+| TAP natif 180 s | 9 755 040 échantillons AudioRecord ; `testSignalFrames=0` ; armement conservé en arrière-plan | callbacks et émission RTP continus |
+
+Les échantillons de microphone non nuls d’un émulateur peuvent provenir du loopback de son système audio. `testSignalFrames` reste séparé des compteurs de microphone.
+
+| Récepteur natif | Énergie RTP reçue | RTT mesuré | Jitter | Pertes |
+|---|---:|---:|---:|---:|
+| A | 0,000955 | 0 ms | 2 ms | 0 % |
+| B | 0,001467 | 0 ms | 3 ms | 0 % |
+
+Ces instantanés RTP peuvent précéder la fin de la tonalité et les compteurs PCM de sortie. Le RTT local de l’émulateur ne représente pas la latence microphone → casque.
 
 ### Exemple de mesures Web réellement collectées
 
-Instantané lors de l’essai trois locuteurs du candidat 0c21300, après cinq secondes d’émission simultanée. Chaque cellule décrit une connexion distincte ; ces compteurs ne sont pas un débit moyen ni une mesure de latence.
+Essai de trois clients, après cinq secondes d’émission simultanée. Chaque ligne décrit une connexion distincte ; ces compteurs ne sont pas un débit moyen ni une latence.
 
 | Sens | Octets TX / RX vus par le pair local | Énergie audio reçue | RMS décodé reçu |
 |---|---:|---:|---:|
-| Hôte ↔ invité 1 | 19 594 / 20 218 | 0,008562 | −32,48 dBFS |
-| Hôte ↔ invité 2 | 18 584 / 20 048 | 0,016986 | −32,70 dBFS |
-| Invité 1 ↔ hôte | 20 218 / 19 594 | 0,007710 | −35,96 dBFS |
-| Invité 1 ↔ invité 2 | 18 578 / 20 511 | 0,016955 | −33,07 dBFS |
-| Invité 2 ↔ hôte | 20 048 / 18 584 | 0,007775 | −32,94 dBFS |
-| Invité 2 ↔ invité 1 | 20 511 / 18 578 | 0,008432 | −36,00 dBFS |
+| Hôte ↔ invité 1 | 23 429 / 23 464 | 0.008073 | -34.11 dBFS |
+| Hôte ↔ invité 2 | 20 211 / 20 040 | 0.019282 | -29.91 dBFS |
+| Invité 1 ↔ hôte | 23 545 / 23 429 | 0.007201 | -34.98 dBFS |
+| Invité 1 ↔ invité 2 | 20 439 / 20 405 | 0.018965 | -32.64 dBFS |
+| Invité 2 ↔ hôte | 20 040 / 20 211 | 0.007207 | -35.95 dBFS |
+| Invité 2 ↔ invité 1 | 20 486 / 20 439 | 0.008121 | -35.42 dBFS |
 
-Les compteurs de capture Web non nulle sont respectivement 9 356 800, 372 736 et 285 184 échantillons. L’entrée est simulée par Chromium ; aucune conclusion sur les microphones physiques ne découle de ces chiffres. Les snapshots RTP étant asynchrones, TX et RX opposés peuvent différer légèrement.
+Les compteurs Web de capture non nulle sont 9 357 184, 368 000, 275 584 échantillons. L’entrée est simulée par Chromium via getUserMedia ; aucun résultat sur les microphones physiques ne découle de ces chiffres. Les snapshots TX/RX opposés peuvent différer légèrement.
 
 ## Fichiers modifiés
 
 - Audio : `RtcMobile.kt`, `MobileService.kt`, nouveaux `AudioNegotiation.kt`, `TalkControl.kt`, `mobile/talk.js`, `mobile/meter-worklet.js`, `mobile/core.js`.
 - Réseau / QR : `FosaConnectionManager.kt`, `LanAddress.kt`, `LanHttp.kt`, nouveau `WifiQr.kt`.
 - Interface / cache : `MobileActivity.kt`, `FosaDesign.kt`, `mobile/app.js`, `mobile/style.css`, `mobile/sw.js`.
-- Tests : `MobileEngineTest.kt`, `MobileUiTest.kt`, `LocalPairingTest.kt`, nouveau `HybridAudioTest.kt`, `mobile/tests/local-first.cjs`, nouveau `mobile/tests/talk-control.cjs`.
+- Tests : `MobileEngineTest.kt`, `MobileUiTest.kt`, `LocalPairingTest.kt`, nouveau `HybridAudioTest.kt`, `BodypackUiTest.kt`, `mobile/tests/local-first.cjs`, nouveau `mobile/tests/talk-control.cjs`, `audio-bridge/tests/low_latency_browser_flow.cjs`.
 - Version / publication : `native/android/app/build.gradle.kts`, workflows Android et vérification audio, script Android de collecte des mesures.
 - Documentation : README, QUICKSTART, PROTOCOL, VALIDATION et ce rapport.
 
 Le Bodypack/MR18, le bridge PC et le moteur Low Latency restent des chemins distincts. Ils ont leurs régressions propres ; aucun monitoring MR18 depuis une session Mobile sans PC n’est annoncé.
+
+## Contrôles des artefacts publiés
+
+| Contrôle | Résultat vérifié |
+|---|---|
+| APK versionné réellement téléchargé | HTTP 200 ; 63 144 179 octets ; manifeste `com.arizona.fosa` / `0.14.0` / versionCode `21` |
+| APK stable réellement téléchargé | même SHA-256 que l’APK versionné ; tags rattachés au commit applicatif distribué |
+| Signature APK | signature v2 et digest de contenu vérifiés cryptographiquement ; certificat identique à l’APK 0.13.0 |
+| Mise à jour Android | identité de signature conservée ; APK de type debug, comme la distribution précédente |
+| Web embarqué | les 11 fichiers `assets/fosa-web/` correspondent octet par octet au dépôt vérifié |
+| GitHub Pages réel | HTTP 200 sur les 11 fichiers Mobile ; tous les octets correspondent au dépôt |
+| PWA | cache `fosa-mobile-0.14.0`, modules Talk/PCM inclus, version affichée 0.14.0 |
+
+APK SHA-256 : `103aabf14f519ebb25dec9679acfbebda4ad1f697248690eff65deaf759d18aa`.
+
+Certificat SHA-256 : `16c73ab9e6bf8f04e4d6bd32beb2ab4635343fd537b9f97297f50b1d37b1f0d1`.
+
+### Empreintes Web (publiées et embarquées)
+
+| Fichier | SHA-256 |
+|---|---|
+| `app.js` | `5cc2ff7cd5661622f2ba1033240068e431c347f26ebd93d38d7e0eb9e6ebb73c` |
+| `connection.js` | `30f4c1bef366360e50622beb90a872637042c40b97317db4dd9a59f7e298a1d4` |
+| `core.js` | `b7d602af3c790cb49db879a5f23968debda89b46277f9a50caf5f68a3b79491c` |
+| `icon.svg` | `ad4662a30faa9c4cd67c55d549cc531a9ed84928f78217690c2b307c496f32b6` |
+| `index.html` | `fef3f8d92023533c7b37463a35ea65827b3eb624ffdc47a927dec44200a2cd58` |
+| `manifest.json` | `d8428e3efb6fc847eef2f83bbb8ba8e8e7b6246094cfa3aa0d0b303f075f72b3` |
+| `meter-worklet.js` | `c54ee3bb5f7c454ec651cdf23080cba72007d739c7f24b059e58d81b873fe4ac` |
+| `qr.js` | `bec651a984953adf3df9798b2f14406105494363eef513851a4417f830392ec4` |
+| `style.css` | `cf933884124de07dbcb02d0090c86520be8d388d84d03eb7f2d37cc1327d9703` |
+| `sw.js` | `b00b37aa20d5c3d7491eeb1f5d095fc621ee051609fe7cd843ff86706b716e78` |
+| `talk.js` | `007a7424da12a3181f11a99cb96ea2a78fe1fde60f7e9903ca622a02fa74c894` |
 
 ## Essais matériels restant nécessaires
 
