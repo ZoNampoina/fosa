@@ -24,13 +24,16 @@ class FosaConnectionManager(private val ctx:Context,private val changed:(Connect
     private fun record(s:LocalSession){if(closed||s.id.isBlank())return;val key=s.id+":"+s.kind;sessions[key]=s;queue.offer(s);listener?.invoke(sessions.values.filter{!it.device}.sortedWith(compareBy({it.kind.ordinal},{it.name})))}
     private fun scanLan(){lan.discover(::record){}}
     fun announce(q:JSONObject){lan.announce(q);direct.announce(q)}
-    fun hostNetwork():String {
-        if(transport==TransportKind.HOTSPOT){val end=System.currentTimeMillis()+4000;while(System.currentTimeMillis()<end){hotspot.address()?.let{return it};Thread.sleep(100)};throw IllegalArgumentException("Le réseau FOSA local ne fournit pas encore d’adresse. Réessaie.")}
-        LanAddress.ip(ctx)?.let{if(transport!=TransportKind.HOTSPOT)transport=TransportKind.LAN;return it}
+    fun hostNetwork(selection:String="AUTO"):String {
+        if(selection!="HOTSPOT"&&selection!="AUTO"&&transport==TransportKind.HOTSPOT)hotspot.close()
+        if(selection=="HOTSPOT"||selection=="AUTO"&&transport==TransportKind.HOTSPOT){val end=System.currentTimeMillis()+4000;while(System.currentTimeMillis()<end){hotspot.address()?.let{return it};Thread.sleep(100)};throw IllegalArgumentException("Le réseau FOSA local ne fournit pas encore d’adresse. Réessaie.")}
+        if(selection=="CURRENT"){transport=TransportKind.LAN;return LanAddress.currentIp(ctx) ?: throw IllegalArgumentException("Réseau actuel inutilisable : active le Wi-Fi ou Ethernet et vérifie l’adresse locale. Aucun réglage du routeur n’est modifié.")}
+        if(selection!="WIFI_DIRECT")LanAddress.ip(ctx)?.let{transport=TransportKind.LAN;return it}
         transport=TransportKind.WIFI_DIRECT;phase(ConnectionPhase.CONNECTING_NETWORK)
-        awaitNetwork{ok,fail->direct.createGroup(ok,fail)}
-        return LanAddress.ip(ctx) ?: throw IllegalArgumentException("Le groupe Wi-Fi Direct ne fournit pas d’adresse locale")
+        val address=awaitNetwork{ok,fail->direct.createGroup(ok,fail)}
+        return address.takeIf{LanAddress.privateV4(it)} ?: throw IllegalArgumentException("Le groupe Wi-Fi Direct ne fournit pas d’adresse locale")
     }
+    fun currentAddress():String?=when(transport){TransportKind.HOTSPOT->hotspot.address();TransportKind.WIFI_DIRECT->direct.ownerAddress.takeIf{LanAddress.privateV4(it)}?.let{LanAddress.sourceForPeer(it)};else->LanAddress.currentIp(ctx)}
     private fun awaitNetwork(start:((String)->Unit,(String)->Unit)->Unit):String {
         val done=CountDownLatch(1);var address="";var error=""
         start({address=it;done.countDown()},{error=it;done.countDown()})

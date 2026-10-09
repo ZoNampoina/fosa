@@ -16,7 +16,7 @@ class LanHttp(address:String,private val room:LanSession?,bindPort:Int=0,
     val port=socket.localPort
     private val running=AtomicBoolean(true)
     private val pool=java.util.concurrent.ThreadPoolExecutor(2,4,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue(32))
-    private val assets=setOf("index.html","app.js","core.js","connection.js","qr.js","style.css","icon.svg","manifest.json","sw.js")
+    private val assets=setOf("index.html","app.js","core.js","connection.js","talk.js","meter-worklet.js","qr.js","style.css","icon.svg","manifest.json","sw.js")
     init{Thread({while(running.get())try{val c=socket.accept();try{pool.execute{serve(c)}}catch(_:Exception){c.close()}}catch(_:Exception){}},"FOSA-local-server").apply{isDaemon=true;start()}}
     private fun serve(c:Socket){c.use{try{
         c.soTimeout=4000

@@ -13,6 +13,72 @@ import java.util.concurrent.ConcurrentLinkedQueue
 @RunWith(AndroidJUnit4::class)
 class MobileEngineTest {
     private fun await(label:String,check:()->Boolean){val deadline=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<deadline){if(check())return;Thread.sleep(30)};fail(label)}
+    private fun negotiation(engine:RtcMobile)=engine.links.values.joinToString("\n"){l->"state=${l.pc.signalingState()} sendReady=${l.sendReady} error=${engine.error}\nLOCAL ${l.pc.localDescription?.description}\nREMOTE ${l.pc.remoteDescription?.description}"}
+    @Test fun simultaneousMicrophonePermissionUpgradeKeepsAudioNegotiated(){
+        val ctx=InstrumentationRegistry.getInstrumentation().targetContext
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
+        val queue=ConcurrentLinkedQueue<Triple<String,String,JSONObject>>()
+        val a=RtcMobile(ctx,"a",false,{_,t,d->queue.add(Triple("b",t,d))},{},{_,_->JSONObject()})
+        val b=RtcMobile(ctx,"b",false,{_,t,d->queue.add(Triple("a",t,d))},{},{_,_->JSONObject()})
+        fun drain(){while(true){val q=queue.poll()?:break;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        val members=listOf(JSONObject().put("id","a").put("online",true),JSONObject().put("id","b").put("online",true))
+        try{
+            a.sync(members);b.sync(members)
+            await("Receive-only peers must connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val original=a.links.getValue("b").pc
+            // Deliberately hold both offers until both peers have made a local offer.
+            a.enableMicrophone();b.enableMicrophone()
+            await("Both upgrade offers must be made before delivery"){queue.count{it.second=="offer"}>=2}
+            await("Simultaneous permission upgrades must settle both audio senders"){drain();
+                listOf(a.links.getValue("b"),b.links.getValue("a")).all{l->
+                    l.pc.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&
+                    l.sendReady&&l.pc.transceivers.any{it.sender.track()?.id()==l.track?.id()&&it.currentDirection in listOf(org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV,org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)}
+                }}
+            assertSame("Permission grant must preserve the session transport",original,a.links.getValue("b").pc)
+            val aRx=a.playbackNonZeroFrames;val bRx=b.playbackNonZeroFrames
+            a.testAudio();b.testAudio()
+            await("A permission glare recovery must carry actual decoded PCM both ways"){drain();a.playbackNonZeroFrames>aRx+4800&&b.playbackNonZeroFrames>bRx+4800}
+        }catch(e:Throwable){android.util.Log.e("FOSA_AUDIO_QA","FOSA_NEGOTIATION_FAILURE A ${negotiation(a)} B ${negotiation(b)}",e);throw e}finally{a.close();b.close()}
+    }
+    @Test fun talkControlTimeoutVoxAndNoRearm(){
+        fun sdp(direction:String,port:Int=9)="v=0\r\nm=audio $port UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=$direction\r\n"
+        assertTrue(AudioNegotiation.sending(sdp("sendrecv"),sdp("recvonly")))
+        assertFalse(AudioNegotiation.sending(sdp("recvonly"),sdp("sendonly")))
+        assertFalse(AudioNegotiation.sending(sdp("sendrecv"),sdp("sendrecv",0)))
+        val local=sdp("sendrecv")+"a=msid:fosa mic-b\r\n"
+        assertTrue(AudioNegotiation.sending(local,sdp("recvonly"),"mic-b"))
+        assertFalse(AudioNegotiation.sending(local,sdp("recvonly"),"absent-track"))
+        val c=TalkControl();assertEquals("HOLD",c.mode);assertFalse(c.armed)
+        c.active(true,1000);c.tick(31000);assertFalse(c.requested)
+        c.mode("TAP");c.active(true,1000);c.tick(181000);assertTrue("TAP must stay open for minutes without HOLD timer",c.requested)
+        c.stop();c.tick(190000);assertFalse(c.requested)
+        c.timeoutMs=300000;c.active(true,200000);c.tick(500000);assertFalse(c.armed)
+        c.mode("AUTO");assertFalse(c.armed);c.active(true,1);assertFalse(c.requested)
+        c.level(-20.0,10);assertTrue(c.requested);c.level(-100.0,500);assertTrue(c.requested);c.level(-100.0,700);assertFalse(c.requested)
+        c.stop();c.level(-10.0,900);assertFalse("Noise cannot rearm AUTO",c.requested)
+    }
+    @Test fun nativeOpusDecodedPcmBothDirectionsAndExplicitTestStops(){
+        val ctx=InstrumentationRegistry.getInstrumentation().targetContext
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
+        val queue=ConcurrentLinkedQueue<Triple<String,String,JSONObject>>()
+        val a=RtcMobile(ctx,"a",true,{_,t,d->queue.add(Triple("b",t,d))},{},{_,_->JSONObject()})
+        val b=RtcMobile(ctx,"b",true,{_,t,d->queue.add(Triple("a",t,d))},{},{_,_->JSONObject()})
+        fun drain(){while(true){val q=queue.poll()?:break;if(q.first=="a")a.receive("b",q.second,q.third)else b.receive("a",q.second,q.third)}}
+        val members=listOf(JSONObject().put("id","a").put("online",true),JSONObject().put("id","b").put("online",true))
+        try{a.sync(members);b.sync(members);await("Native peers connect"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true}
+            val aRx=a.playbackNonZeroFrames;val bRx=b.playbackNonZeroFrames
+            a.testAudio();b.testAudio()
+            await("Both actual native decoders must output nonzero PCM, not just enabled tracks"){drain();a.stats();b.stats();a.playbackNonZeroFrames>aRx+4800&&b.playbackNonZeroFrames>bRx+4800}
+            assertTrue(a.testSignalFrames>4800);assertTrue(b.testSignalFrames>4800)
+            await("Explicit test must stop after two seconds"){a.heartbeat();b.heartbeat();!a.testing&&!b.testing&&!a.talkRequested&&!b.talkRequested}
+            a.mode("TAP");a.push(true);assertTrue(a.talkControl.armed);a.panic(true);a.panic(false);assertFalse(a.talkControl.armed);assertFalse(a.talkRequested)
+            a.push(true);members[0].put("canTalk",false);a.sync(members);members[0].put("canTalk",true);a.sync(members);assertFalse("Permission restoration cannot reopen TAP",a.talkControl.armed)
+            assertTrue(a.links.getValue("b").stats.optLong("bytesSent")>0);assertTrue(b.links.getValue("a").stats.optLong("bytesReceived")>0)
+            android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_PCM a=${a.diagnostics()} stats=${a.links.getValue("b").stats} b=${b.diagnostics()} stats=${b.links.getValue("a").stats}")
+            a.mode("HOLD");a.testAudio();a.receive("b","reset",JSONObject())
+            assertFalse("Transport reset must stop an explicit diagnostic signal even in HOLD mode",a.testing);assertFalse(a.talkRequested)
+        }finally{a.close();b.close()}
+    }
     @Test fun coordinatorAuthenticationGroupsUnicodeAndBoundaries(){
         var now=1000L;val room=LanSession("Répétition","Zo","SAX"){now};val owner=room.ticket(room.owner).getString("token")
         try{room.call("join",JSONObject().put("code","000000"));fail("Private session must reject wrong code")}catch(_:IllegalArgumentException){}
@@ -73,7 +139,7 @@ class MobileEngineTest {
             a.sync(members);b.sync(members);await("Direct LAN native ICE must connect and activate held PTT"){drain();a.links["b"]?.connected==true&&b.links["a"]?.connected==true&&a.talking}
             assertTrue("Held PTT must enable the sender as soon as ICE connects",a.links.getValue("b").track!!.enabled());a.push(false)
             val listeningPc=b.links.getValue("a").pc;assertNull(b.links.getValue("a").track)
-            b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
+            b.enableMicrophone();await("Permission upgrade must renegotiate without replacing the listening transport"){drain();upgradeOfferReceived&&b.links["a"]?.sendReady==true&&b.links["a"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE&&a.links["b"]?.pc?.signalingState()==org.webrtc.PeerConnection.SignalingState.STABLE}
             assertSame(listeningPc,b.links.getValue("a").pc);b.push(true,"user:a");assertTrue(b.links.getValue("a").track!!.enabled());b.push(false)
             b.push(true,"leader");assertTrue("A member must be able to target the session leader",b.links.getValue("a").track!!.enabled());b.push(false)
             assertNotNull("Receiving track must exist before listen filtering",b.links.getValue("a").received)

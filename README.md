@@ -1,11 +1,13 @@
-# FOSA Mobile 0.13.0 — LOCAL-FIRST PAIRING
+# FOSA Mobile 0.14.0 — AUDIO + MAINS LIBRES
 
-Créer une session puis saisir six chiffres : l’Android cherche d’abord l’hôte sur le LAN, puis via Wi-Fi Direct natif. Sans réseau commun, l’hôte peut créer un groupe P2P ou un hotspot local. Internet n’est pas nécessaire pour la découverte, l’authentification, la signalisation ou l’audio du nouveau parcours.
+Choisir USE CURRENT NETWORK, créer une session puis saisir six chiffres : l’Android cherche d’abord l’hôte sur le LAN, puis via Wi-Fi Direct natif. Sans réseau commun, l’hôte peut créer un groupe P2P ou un hotspot local. Internet n’est pas nécessaire pour la découverte, l’authentification, la signalisation ou l’audio du nouveau parcours.
 
 - **Android** : [FOSA-Android.apk](https://github.com/ZoNampoina/fosa/releases/download/android-latest/FOSA-Android.apk).
 - **Web** : ouvrir **WEB ACCESS** sur l’hôte Android, puis son URL locale ; HTML/JS/CSS/QR/PWA sont embarqués dans l’APK. Micro/PWA exigent le HTTPS local et la confiance au certificat de cet hôte une fois.
 - **GitHub Pages** : [FOSA Mobile](https://zonampoina.github.io/fosa/mobile/) reste disponible, sans être nécessaire au Web fourni localement.
-- **Guides** : [démarrage](docs/mobile/QUICKSTART.md), [protocole](docs/mobile/PROTOCOL.md), [tests](docs/mobile/VALIDATION.md), [rapport et limites](docs/mobile/LOCAL-FIRST-REPORT.md).
+- **Guides** : [démarrage](docs/mobile/QUICKSTART.md), [protocole](docs/mobile/PROTOCOL.md), [tests](docs/mobile/VALIDATION.md), [rapport audio et limites](docs/mobile/AUDIO-HANDSFREE-REPORT.md).
+
+HOLD conserve l’appui pour parler. TAP ouvre le micro jusqu’au second toucher, avec notification persistante Android et temporisation facultative. AUTO est désarmé par défaut et utilise un seuil d’énergie réglable. Panic, révocation et perte de réseau ferment le micro sans réarmement automatique. AUDIO DIAGNOSTICS mesure la capture, le RTP et le PCM décodé ; TEST AUDIO envoie un signal de deux secondes dans la vraie chaîne. Le QR Wi-Fi du hotspot et le QR de session sont distincts.
 
 Join propose NEARBY, ENTER CODE et SCAN QR. Members permet ADD DEVICE, SHOW QR et WEB ACCESS. Les QR normaux sont des locators courts : aucun SDP/ICE, aucun scan retour. Les identités et générations évitent les doublons lors d’une reprise. Audio Opus et commandes restent directs sur le réseau local ; aucun média Supabase/STUN/TURN.
 

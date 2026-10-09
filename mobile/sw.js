@@ -1,4 +1,4 @@
-const CACHE='fosa-mobile-0.13.0',FILES=['./','./index.html','./style.css','./app.js','./core.js','./connection.js','./qr.js','./icon.svg','./manifest.json'];
+const CACHE='fosa-mobile-0.14.0',FILES=['./','./index.html','./style.css','./app.js','./core.js','./connection.js','./talk.js','./meter-worklet.js','./qr.js','./icon.svg','./manifest.json'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('fosa-mobile-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.pathname.startsWith('/lan/')||u.pathname.startsWith('/pair/')||e.request.method!=='GET'||u.origin!==self.location.origin||!u.pathname.startsWith(new URL('./',self.location.href).pathname))return;e.respondWith(caches.open(CACHE).then(async c=>{const saved=await c.match(e.request,{ignoreSearch:true});if(saved)return saved;return fetch(e.request);}));});

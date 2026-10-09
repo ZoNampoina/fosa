@@ -18,7 +18,7 @@ JOIN v2 contient code/session/protocolVersion=2, clientKey et nonce de challenge
 
 Six chiffres = identité de session et protection contre erreurs de sélection, pas secret fort. Le code annoncé ne protège pas d’un utilisateur du LAN. L’admission native HTTP suppose un LAN de confiance et n’est pas résistante à un attaquant actif sur ce réseau.
 
-Poll : after, talk, target, level ; réponse session/sessionName/leader/members/signals. Signal : seq/from/generation/type/data, types offer/answer/ice/reset. La plus petite identité produit les offres pour éviter les collisions. Acquittement après application. Générations anciennes ignorées. Owner seul change groupes et canTalk/canListen. Les récepteurs conformes appliquent les permissions aux pistes.
+Poll : after, talk, target, level ; réponse session/sessionName/leader/members/signals. Signal : seq/from/generation/type/data, types offer/answer/ice/reset. La plus petite identité produit les offres initiales. Lors d’une collision de renégociation, elle ignore l’offre concurrente ; l’autre pair annule son offre locale avant d’accepter la distante. Les changements de micro n’abandonnent pas la session ni le canal de contrôle. Acquittement après application. Générations anciennes ignorées. Owner seul change groupes et canTalk/canListen. Les récepteurs conformes appliquent les permissions aux pistes.
 
 ## Identité/reprise
 
@@ -38,6 +38,6 @@ Web local : device-register → QR court → owner device-admit → device-poll 
 
 WebRTC Opus, DTLS/SRTP, ICE servers vide. Candidats host locaux IPv4 privés/IPv6 privés/link-local/mDNS, UDP privilégié et TCP host accepté. Candidats relay/srflx et publics filtrés ; paire externe relay/srflx refusée. Média pair à pair, pas de cloud/HTTP/Supabase/TURN. Full mesh jusqu’à huit membres ; aucune migration d’hôte automatique livrée.
 
-Stats : paire sélectionnée, adresses/ports/types candidats, protocole, DTLS, codec, paquets RX/TX, RTT, jitter, perte. Mouth-to-ear UNKNOWN ; les statistiques RTC ne constituent pas une latence physique.
+Stats : paire sélectionnée, adresses/ports/types candidats, protocole, DTLS, codec, paquets et octets RX/TX, énergie audio décodée/durée/échantillons lorsque fournis par WebRTC, deltas RTP, état SDP et sender, capture PCM/RMS et PCM de lecture natif, RTT, jitter, perte. Mouth-to-ear UNKNOWN ; les statistiques RTC ne constituent pas une latence physique.
 
 Ancien rendez-vous : le code-only de GitHub Pages reste disponible lorsque l'hôte active explicitement ENABLE INTERNET DISCOVERY · 2 MIN dans Advanced Diagnostics. Ce bootstrap est limité à l'origine HTTPS GitHub Pages ; le Web local ne l'appelle pas. Audio et contrôle sont directs après le pairing. Le SDP compressé/QR aller-retour n'est visible que dans le test de compatibilité 0.12, jamais dans le parcours normal 0.13. Aucun changement Supabase requis pour les sessions locales.

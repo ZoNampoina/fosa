@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.*
@@ -18,6 +20,7 @@ class MobileUiTest {
     @get:Rule val ui=createAndroidComposeRule<MobileActivity>()
     private fun shell(command:String){android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)).use{it.readBytes()}}
     private fun shot(name:String){ui.waitForIdle();Thread.sleep(300);shell("mkdir -p /sdcard/Download/FOSA-screenshots");shell("screencap -p /sdcard/Download/FOSA-screenshots/$name.png")}
+    @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
     @Test fun premiumScreensRealHostAndBackground(){
         val inst=InstrumentationRegistry.getInstrumentation();val ctx=inst.targetContext
         inst.uiAutomation.executeShellCommand("pm grant ${ctx.packageName} android.permission.RECORD_AUDIO").close()
@@ -45,11 +48,33 @@ class MobileUiTest {
         ui.waitUntil(8000){peer!!.receivedPackets()>packets}
         // Real discovery can occupy the service worker longer than presence
         // timeout. A missing device must not disconnect an existing LAN peer.
+        val discoveryPackets=peer!!.receivedPackets()
+        val captureFrames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
         ui.activityRule.scenario.onActivity{MobileService.instance!!.addDevice(PairingQr.device("ffffffffffff",PairingQr.nonce()))}
         Thread.sleep(14000)
         assertTrue("Talk must remain active during device discovery",MobileService.state.optBoolean("talk"))
-        assertTrue("Existing Opus packets must continue during discovery",peer!!.receivedPackets()>packets+100)
+        ui.waitUntil(5000){peer!!.receivedPackets()>discoveryPackets}
+        assertTrue("Real capture callbacks must continue while the worker discovers devices",(MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0)>captureFrames)
         ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
+        ui.onNodeWithTag("mode-TAP").performScrollTo().performClick();ui.onNodeWithTag("talk-button").performScrollTo().performClick()
+        ui.waitUntil(4000){MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed")}
+        var tapFrames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
+        val tapPackets=peer!!.receivedPackets()
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        repeat(12){Thread.sleep(15000)
+            assertTrue("Native TAP must stay armed in background for three real minutes",MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed"))
+            val frames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
+            assertTrue("Actual AudioRecord callbacks must keep arriving during TAP",frames>tapFrames);tapFrames=frames
+        }
+        assertTrue("The native remote decoder must keep receiving RTP during background TAP",peer!!.receivedPackets()>tapPackets)
+        android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_TAP_BACKGROUND seconds=180 ${MobileService.state.optJSONObject("audioDiagnostics")}")
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);ui.onNodeWithTag("talk-button").performScrollTo().performClick();ui.waitUntil(1500){!MobileService.state.optBoolean("talkArmed")}
+        ui.onNodeWithTag("mode-HOLD").performScrollTo().performClick()
+        ui.onNodeWithTag("talk-button").performSemanticsAction(SemanticsActions.RequestFocus){it()}
+        ui.onNodeWithTag("talk-button").performKeyInput{keyDown(Key.Spacebar)}
+        ui.waitUntil(3000){MobileService.state.optBoolean("talk")}
+        ui.onNodeWithTag("talk-button").performKeyInput{keyUp(Key.Spacebar)}
+        ui.waitUntil(1500){!MobileService.state.optBoolean("talkRequested")}
         val peerId=peer!!.id;peer!!.reconnect()
         ui.waitUntil(15000){MobileService.state.optJSONArray("members")?.let{a->a.length()==2&&(0 until a.length()).any{a.getJSONObject(it).optString("id")==peerId&&a.getJSONObject(it).optInt("generation",1)==2}}==true}
         ui.waitUntil(15000){MobileService.state.optJSONArray("metrics")?.optJSONObject(0)?.let{it.optBoolean("connected")&&it.optString("id")==peerId}==true}
