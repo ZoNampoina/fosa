@@ -55,9 +55,16 @@ class MobileUiTest {
         ui.onNodeWithTag("talk-button").performTouchInput{up()};ui.waitUntil(1500){!MobileService.state.optBoolean("talk")};assertFalse(MobileService.state.optBoolean("talk"))
         ui.onNodeWithTag("mode-TAP").performScrollTo().performClick();ui.onNodeWithTag("talk-button").performScrollTo().performClick()
         ui.waitUntil(4000){MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed")}
-        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);Thread.sleep(32000)
-        assertTrue("Native TAP must survive activity background and HOLD safety time",MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed"))
-        android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_TAP_BACKGROUND ${MobileService.state.optJSONObject("audioDiagnostics")}")
+        var tapFrames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
+        val tapPackets=peer!!.receivedPackets()
+        ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        repeat(12){Thread.sleep(15000)
+            assertTrue("Native TAP must stay armed in background for three real minutes",MobileService.state.optBoolean("talk")&&MobileService.state.optBoolean("talkArmed"))
+            val frames=MobileService.state.optJSONObject("audioDiagnostics")?.optLong("captureFrames") ?: 0L
+            assertTrue("Actual AudioRecord callbacks must keep arriving during TAP",frames>tapFrames);tapFrames=frames
+        }
+        assertTrue("The native remote decoder must keep receiving RTP during background TAP",peer!!.receivedPackets()>tapPackets)
+        android.util.Log.i("FOSA_AUDIO_QA","FOSA_NATIVE_TAP_BACKGROUND seconds=180 ${MobileService.state.optJSONObject("audioDiagnostics")}")
         ui.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);ui.onNodeWithTag("talk-button").performScrollTo().performClick();ui.waitUntil(1500){!MobileService.state.optBoolean("talkArmed")}
         ui.onNodeWithTag("mode-HOLD").performScrollTo().performClick()
         val peerId=peer!!.id;peer!!.reconnect()

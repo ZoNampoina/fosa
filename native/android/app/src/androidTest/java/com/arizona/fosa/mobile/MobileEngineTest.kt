@@ -35,6 +35,9 @@ class MobileEngineTest {
                     l.pc.transceivers.any{it.sender.track()!=null&&it.currentDirection==org.webrtc.RtpTransceiver.RtpTransceiverDirection.SEND_RECV}
                 }}
             assertSame("Permission grant must preserve the session transport",original,a.links.getValue("b").pc)
+            val aRx=a.playbackNonZeroFrames;val bRx=b.playbackNonZeroFrames
+            a.testAudio();b.testAudio()
+            await("A permission glare recovery must carry actual decoded PCM both ways"){drain();a.playbackNonZeroFrames>aRx+4800&&b.playbackNonZeroFrames>bRx+4800}
         }catch(e:Throwable){android.util.Log.e("FOSA_AUDIO_QA","FOSA_NEGOTIATION_FAILURE A ${negotiation(a)} B ${negotiation(b)}",e);throw e}finally{a.close();b.close()}
     }
     @Test fun talkControlTimeoutVoxAndNoRearm(){
@@ -42,6 +45,9 @@ class MobileEngineTest {
         assertTrue(AudioNegotiation.sending(sdp("sendrecv"),sdp("recvonly")))
         assertFalse(AudioNegotiation.sending(sdp("recvonly"),sdp("sendonly")))
         assertFalse(AudioNegotiation.sending(sdp("sendrecv"),sdp("sendrecv",0)))
+        val local=sdp("sendrecv")+"a=msid:fosa mic-b\r\n"
+        assertTrue(AudioNegotiation.sending(local,sdp("recvonly"),"mic-b"))
+        assertFalse(AudioNegotiation.sending(local,sdp("recvonly"),"absent-track"))
         val c=TalkControl();assertEquals("HOLD",c.mode);assertFalse(c.armed)
         c.active(true,1000);c.tick(31000);assertFalse(c.requested)
         c.mode("TAP");c.active(true,1000);c.tick(181000);assertTrue("TAP must stay open for minutes without HOLD timer",c.requested)

@@ -13,10 +13,10 @@ splash_test_result=$?
 
 mkdir -p app/build/reports/androidTests/diagnostics
 adb logcat -d -v threadtime > app/build/reports/androidTests/diagnostics/logcat.txt
-rg 'FOSA_(HYBRID_PCM|NATIVE_PCM|NATIVE_TAP_BACKGROUND)' app/build/reports/androidTests/diagnostics/logcat.txt || true
+grep -E 'FOSA_(HYBRID_PCM|NATIVE_PCM|NATIVE_TAP_BACKGROUND)' app/build/reports/androidTests/diagnostics/logcat.txt || true
 printf 'functional_tests=%s\nsplash_visual_test=%s\n' "$fosa_test_result" "$splash_test_result" > app/build/reports/androidTests/diagnostics/summary.txt
 if [ "$fosa_test_result" -ne 0 ]; then
-  rg 'FOSA_AUDIO_QA|Audio SDP|FATAL EXCEPTION|Fatal signal|RtpTransceiver|AssertionError|WebRtcAudioRecord.*(error|failed)|tombstone|native.*crash' app/build/reports/androidTests/diagnostics/logcat.txt | tail -100 || true
+  grep -E 'FOSA_AUDIO_QA|Audio SDP|FATAL EXCEPTION|Fatal signal|RtpTransceiver|AssertionError|WebRtcAudioRecord.*(error|failed)|tombstone|native.*crash' app/build/reports/androidTests/diagnostics/logcat.txt | tail -160 || true
   adb shell dumpsys activity lastanr > app/build/reports/androidTests/diagnostics/last-anr.txt
 fi
 adb pull /sdcard/Download/FOSA-screenshots ../../android-screenshots
