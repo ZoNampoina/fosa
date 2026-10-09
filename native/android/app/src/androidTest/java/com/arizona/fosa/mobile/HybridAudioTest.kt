@@ -44,11 +44,26 @@ class HybridAudioTest {
             val nativeBefore=engine.playbackNonZeroFrames
             js("fosaMobile.testAudio();true")
             await("Web encoder must reach the actual native decoder PCM callback"){engine.playbackNonZeroFrames>nativeBefore+4800}
+            await("Web diagnostic must stop before reversing the test direction"){js("!fosaMobile.testTone && !fosaMobile.talkRequested")=="true"}
+            // Measure decoded remote PCM on the audio thread. A short tone may finish
+            // while the emulator's UI thread is delayed; its cumulative proof remains.
+            assertEquals("true",js("""
+                (()=>{const c=fosaMobile,l=[...c.links.values()][0],ctx=c.context;
+                window.fosaQaPcm={frames:0,nonzero:0,peakDbfs:-120};
+                const source=ctx.createMediaStreamSource(l.audio.srcObject);
+                const meter=new AudioWorkletNode(ctx,'fosa-meter',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1]});
+                const sink=ctx.createGain();sink.gain.value=0;
+                meter.port.onmessage=e=>{Object.assign(fosaQaPcm,e.data);fosaQaPcm.peakDbfs=Math.max(fosaQaPcm.peakDbfs,e.data.dbfs);};
+                source.connect(meter).connect(sink).connect(ctx.destination);
+                window.fosaQaNodes=[source,meter,sink];
+                window.fosaQaBefore={nonzero:0,bytes:l.metrics.bytesReceived||0,energy:l.metrics.totalAudioEnergy||0};return true;})()
+            """))
             engine.testAudio()
-            await("Native encoder must reach production Web decoded PCM and RTP energy"){js("fosaMobile.measureMic();[...fosaMobile.links.values()].some(l=>l.receiveLevel>-65 && l.metrics.bytesReceived>0 && l.metrics.totalAudioEnergy>0)")=="true"}
+            await("Native encoder must reach production Web decoded PCM and increased RTP energy"){js("fosaQaPcm.nonzero>fosaQaBefore.nonzero+4800 && fosaQaPcm.peakDbfs>-65 && [...fosaMobile.links.values()].some(l=>l.metrics.bytesReceived>fosaQaBefore.bytes && l.metrics.totalAudioEnergy>fosaQaBefore.energy+0.00001 && l.audio && !l.audio.paused && !l.audio.muted)")=="true"}
             await("Short explicit test must finish without rearming TAP"){js("!fosaMobile.testTone && !fosaMobile.talkControl.armed && !fosaMobile.talkRequested")=="true"&&!engine.testing}
             assertEquals(2,room.call("poll",JSONObject(),token).getJSONArray("members").length())
             android.util.Log.i("FOSA_AUDIO_QA","FOSA_HYBRID_PCM ${engine.diagnostics()} WEB ${js("JSON.stringify(fosaMobile.diagnostics())")}")
+            android.util.Log.i("FOSA_AUDIO_QA","FOSA_HYBRID_PCM_RX ${js("JSON.stringify(fosaQaPcm)")}")
         }finally{worker.shutdownNow();instrumentation.runOnMainSync{web?.let{it.loadUrl("about:blank");it.destroy()}};scenario.close();engine.close();server.close()}
     }
 }
